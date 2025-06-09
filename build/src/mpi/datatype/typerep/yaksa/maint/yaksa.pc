@@ -1,0 +1,13 @@
+prefix=/home/nkodkani/mpich/build/install
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: Yaksa
+Description: A High Performance Noncontiguous Datatype Processing Engine
+Version: unreleased
+URL: http://www.mpich.org/yaksa
+Requires:
+Libs: -L${libdir} -lyaksa
+Libs.private: -lamdhip64 -lpthread   -lstdc++
+Cflags: -I${includedir}

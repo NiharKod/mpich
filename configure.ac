@@ -3901,6 +3901,19 @@ fi
 # End of thread configure
 # -----------------------------------------------------------------------------
 
+dnl === UCC detection ===
+
+have_ccl=no
+
+# UCC support
+if test "$GPU_SUPPORT" = "HIP" || test "$GPU_SUPPORT" = "CUDA" ; then
+    PAC_CHECK_HEADER_LIB_OPTIONAL([ucc], [ucc/api/ucc.h], [ucc], [ucc_init_version])
+    if test "$pac_have_ucc" = "yes" ; then
+        have_ccl=yes
+        AC_DEFINE([ENABLE_UCC], 1, [Define if UCC is available])
+    fi
+fi
+
 
 # Checkpointing
 AC_ARG_ENABLE(checkpointing,

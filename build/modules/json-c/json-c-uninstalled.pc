@@ -1,0 +1,11 @@
+prefix=
+exec_prefix=
+libdir=/home/nkodkani/mpich/build/modules/json-c
+includedir=/home/nkodkani/mpich/build/modules/json-c/../../../modules/json-c
+
+Name: json
+Description: JSON implementation in C
+Version: 0.13.99
+Requires:
+Libs:  -L/home/nkodkani/mpich/build/modules/json-c -ljson-c
+Cflags: -I/home/nkodkani/mpich/build/modules/json-c/../../../modules/json-c
