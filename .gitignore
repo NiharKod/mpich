@@ -636,3 +636,4 @@ src/pmi/src/pmi_msg.c
 *.la
 
 /build/install
+build/
