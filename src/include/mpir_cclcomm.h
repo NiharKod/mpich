@@ -8,7 +8,13 @@
 
 #ifdef ENABLE_CCLCOMM
 
+#ifdef ENABLE_NCCL
 #include <nccl.h>
+#endif
+
+#ifdef ENABLE_UCC
+#include <ucc/api/ucc.h>
+#endif
 
 #ifdef ENABLE_NCCL
 typedef struct MPIR_NCCLcomm {
@@ -17,6 +23,12 @@ typedef struct MPIR_NCCLcomm {
     cudaStream_t stream;
 } MPIR_NCCLcomm;
 #endif /*ENABLE_NCCL */
+
+#ifdef ENABLE_UCC
+typdef struct MPIR_UCCcomm {
+
+} MPIR_UCCcomm;
+#endif /* Enable UCC*/
 
 typedef struct MPIR_CCLcomm {
     MPIR_OBJECT_HEADER;
