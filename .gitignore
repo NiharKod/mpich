@@ -627,3 +627,12 @@ src/pmi/version.m4
 src/pmi/src/pmi_msg.h
 src/pmi/src/pmi_msg.c
 
+# Ignore all built shared/static libraries and object files
+*.so
+*.so.*
+*.a
+*.o
+*.lo
+*.la
+
+/build/install
