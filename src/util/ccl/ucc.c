@@ -286,4 +286,101 @@ static int MPIR_UCC_get_datatype(MPI_Datatype dtype, ucc_datatype_t * ucc_dtype)
     goto fn_exit;
 }
 
+/*
+ * External functions
+ */
+
+int MPIR_UCC_check_requirements_red_op(const void *sendbuf, void *recvbuf, MPI_Datatype datatype,
+                                        MPI_Op op)
+{
+    /* NCCL requires a supported red op and datatype, and both bufs must be on GPU */
+    if (!MPIR_UCC_red_op_is_supported(op) || !MPIR_UCC_datatype_is_supported(datatype) ||
+        !MPIR_CCL_check_both_gpu_bufs(sendbuf, recvbuf)) {
+        return 0;
+    }
+
+    return 1;
+}
+
+int MPIR_UCC_Allreduce(const void *sendbuf, void *recvbuf, MPI_Aint count, MPI_Datatype datatype,
+                        MPI_Op op, MPIR_Comm * comm_ptr, MPIR_Errflag_t errflag)
+{
+    int mpi_errno = MPI_SUCCESS;
+    //cudaError_t ret;
+
+    ucc_reduction_op_t uccOp;
+    mpi_errno = MPIR_NCCL_get_red_op(op, &uccOp);
+    MPIR_ERR_CHECK(mpi_errno);
+
+    ucc_datatype_t uccDatatype;
+    mpi_errno = MPIR_NCCL_get_datatype(datatype, &uccDatatype);
+    MPIR_ERR_CHECK(mpi_errno);
+
+    /* Check the CCLcomm and NCCLcomm are initialized and init them if they are not */
+
+    mpi_errno = MPIR_UCC_check_init_and_init(comm_ptr, comm_ptr->rank);
+    MPIR_ERR_CHECK(mpi_errno);
+    MPIR_NCCLcomm *ucccomm = comm_ptr->cclcomm->ucccomm;
+
+    /* Setup UCC Allreduce */
+
+    ucc_coll_args_t coll_args {
+        .mask = 0;
+        .coll_type = UCC_TYPE_ALLREDUCE,
+        .src = {
+            .info = {
+                .buffer = sendbuf,
+                .count = count,
+                .datatype = uccDatatype,
+                .mem_type = UCC_MEMORY_TYPE_UNKNOWN
+            }
+        },
+        .dst = {
+            .info {
+                .buffer = recvbuf,
+                .count = count,
+                .datatype = uccDatatype,
+                .mem_type = UCC_MEMORY_TYPE_UNKNOWN
+            }
+        },
+        .op = uccOp;
+        .flags = UCC_COLL_ARGS_FLAG_CONTIF_SRC_BUFFER |
+                 UCC_COLL_ARGS_FLAG_CONTIG_DST_BUFFER
+    };
+
+    ucc_coll_req_h req;
+    UCC_CHECK(ucc_collective_init(&coll_args, &req, ucccomm->ucc_team));
+    UCC_CHECK(ucc_collective_post(req));
+    
+    while (ucc_collecctive_test(req) == UCC_INPROGRESS) {
+        UCC_CHECK(ucc_context_progress(MPIR_UCC_global.ucc_context));
+    }
+    UCC_CHECK(ucc_collective_finalize(req));
+
+  fn_exit:
+    return mpi_errno;
+  fn_fail:
+    goto fn_exit;
+}
+
+int MPIR_UCCcomm_free(MPIR_Comm * comm)
+{
+    int mpi_errno = MPI_SUCCESS;
+    MPIR_Assert(comm->cclcomm->ucccomm);
+    MPIR_CCLcomm *cclcomm = comm->cclcomm;
+
+    ret = cudaStreamSynchronize(cclcomm->ncclcomm->stream);
+    CUDA_ERR_CHECK(ret);
+    ret = ncclCommDestroy(cclcomm->ncclcomm->ncclcomm);
+    CUDA_ERR_CHECK(ret);
+    ret = cudaStreamDestroy(cclcomm->ncclcomm->stream);
+    CUDA_ERR_CHECK(ret);
+
+    MPL_free(cclcomm->ucccomm);
+
+  fn_exit:
+    return mpi_errno;
+  fn_fail:
+    goto fn_exit;
+}
 #endif /*ENABLE UCC*/
