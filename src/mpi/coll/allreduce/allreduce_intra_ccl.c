@@ -23,6 +23,14 @@ int MPIR_Allreduce_intra_ccl(const void *sendbuf, void *recvbuf, MPI_Aint count,
                                            errflag);
             }
 #endif
+
+#ifdef ENABLE_UCC
+        case MPIR_CVAR_ALLREDUCE_CCL_UCC:
+            if (MPIR_UCC_check_requirements_red_op(sendbuf, recvbuf, datatype, op)) {
+                return MPIR_UCC_Allreduce(sendbuf, recvbuf, count, datatype, op, comm_ptr,
+                                           errflag);
+            }
+#endif
         default:
             goto fallback;
     }

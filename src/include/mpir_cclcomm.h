@@ -25,8 +25,23 @@ typedef struct MPIR_NCCLcomm {
 #endif /*ENABLE_NCCL */
 
 #ifdef ENABLE_UCC
-typdef struct MPIR_UCCcomm {
 
+typedef struct {
+    MPI_Comm comm;
+    int rank;
+} MPIR_UCC_oob_ctx_t;
+
+typedef struct MPIR_UCCcomm {
+    /* Handles */
+    ucc_lib_h ucc_lib;
+    ucc_context_h ucc_context;
+    ucc_team_h ucc_team;
+
+    ucc_context_config_h ctx_config;
+    ucc_lib_config_h lib_config;
+    MPIR_UCC_oob_ctx_t oob_ctx;
+    bool initialized;
+    
 } MPIR_UCCcomm;
 #endif /* Enable UCC*/
 
@@ -36,6 +51,9 @@ typedef struct MPIR_CCLcomm {
 #ifdef ENABLE_NCCL
     MPIR_NCCLcomm *ncclcomm;
 #endif                          /*ENABLE_NCCL */
+#ifdef ENABLE_UCC
+    MPIR_UCCcomm *uccComm;
+#endif                          /*ENABLE_UCC*/
 } MPIR_CCLcomm;
 
 int MPIR_CCL_check_both_gpu_bufs(const void *sendbuf, void *recvbuf);
@@ -49,6 +67,14 @@ int MPIR_NCCL_Allreduce(const void *sendbuf, void *recvbuf, MPI_Aint count, MPI_
                         MPI_Op op, MPIR_Comm * comm_ptr, MPIR_Errflag_t errflag);
 int MPIR_NCCLcomm_free(MPIR_Comm * comm);
 #endif /*ENABLE_NCCL */
+
+#ifdef ENABLE_UCC
+int MPIR_UCC_check_requirements_red_op(const void *sendbuf, void *recvbuf, MPI_Datatype datatype,
+                                        MPI_Op op);
+int MPIR_UCC_Allreduce(const void *sendbuf, void *recvbuf, MPI_Aint count, MPI_Datatype datatype,
+                        MPI_Op op, MPIR_Comm * comm_ptr, MPIR_Errflag_t errflag);
+int MPIR_UCCcomm_free(MPIR_Comm * comm);
+#endif /*ENABLE_UCC*/
 
 #endif /* ENABLE_CCLCOMM */
 
