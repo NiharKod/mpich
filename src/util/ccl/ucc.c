@@ -89,13 +89,13 @@ static int MPIR_UCCcomm_init(MPIR_Comm *comm_ptr, int rank)
         MPIR_UCC_global.initialized = true;
     }
 
-    // Allocate per-communicator structure
+    /* Allocate per-communicator structure */
     MPIR_UCCcomm *ucccomm = MPL_malloc(sizeof(MPIR_UCCcomm), MPL_MEM_OTHER);
     MPIR_ERR_CHKANDJUMP(!ucccomm, mpi_errno, MPI_ERR_OTHER, "**nomem");
 
-    // Setup out-of-band context (OOB)
+    /* Setup out-of-band context (OOB) */
     ucccomm->oob_ctx.comm = comm_ptr->handle;
-    ucccomm->oob_ctx.rank = comm_ptr->rank;
+    ucccomm->oob_ctx.rank = rank; 
 
     ucc_context_oob_coll_t oob = {
         .allgather = oob_allgather,
@@ -106,7 +106,7 @@ static int MPIR_UCCcomm_init(MPIR_Comm *comm_ptr, int rank)
         .oob_ep    = rank
     };
 
-    // Team creation
+    /* Team creation */
     ucc_team_params_t team_params = {
         .mask = UCC_TEAM_PARAM_FIELD_EP | UCC_TEAM_PARAM_FIELD_EP_RANGE | UCC_TEAM_PARAM_FIELD_OOB,
         .ep = rank,
@@ -130,6 +130,160 @@ fn_exit:
 fn_fail:
     // You may want to free ucccomm or handle failure more gracefully
     return mpi_errno;
+}
+
+static int MPIR_UCC_check_init_and_init(MPIR_Comm * comm_ptr, int rank)
+{
+    int mpi_errno = MPI_SUCCESS;
+
+    if (!comm_ptr->cclcomm) {
+        mpi_errno = MPIR_CCLcomm_init(comm_ptr);
+        MPIR_ERR_CHECK(mpi_errno);
+    }
+
+    if (!comm_ptr->cclcomm->ucccomm) {
+        mpi_errno = MPIR_UCCcomm_init(comm_ptr, comm_ptr->rank);
+        MPIR_ERR_CHECK(mpi_errno);
+    }
+
+  fn_exit:
+    return mpi_errno;
+  fn_fail:
+    goto fn_exit;
+}
+
+static int MPIR_UCC_red_op_is_supported(MPI_Op op)
+{
+    switch (op) {
+        case MPI_SUM:
+        case MPI_PROD:
+        case MPI_MIN:
+        case MPI_MAX:
+        case MPI_LAND:
+        case MPI_LOR:
+        case MPI_LXOR:
+        case MPI_BAND:
+        case MPI_BOR:
+        case MPI_BXOR:
+        case MPI_MAXLOC:
+        case MPI_MINLOC:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+static int MPIR_UCC_get_red_op(MPI_Op op, ucc_reduction_op_t * redOp)
+{
+    int mpi_errno = MPI_SUCCESS;
+
+    switch (op) {
+        case MPI_SUM:
+            *redOp = UCC_OP_SUM;
+            break;
+        case MPI_PROD:
+            *redOp = UCC_OP_PROD;
+            break;
+        case MPI_MIN:
+            *redOp = UCC_OP_MIN;
+            break;
+        case MPI_MAX:
+            *redOp = UCC_OP_MAX;
+            break;
+        case MPI_LAND:
+            *redOp = UCC_OP_LAND;
+            break;
+        case MPI_LOR:
+            *redOp = UCC_OP_LOR;
+            break;
+        case MPI_LXOR:
+            *redOp = UCC_OP_LXOR;
+            break;
+        case MPI_BAND:
+            *redOp = UCC_OP_BAND;
+            break;
+        case MPI_BOR:
+            *redOp = UCC_OP_BXOR;
+            break;
+        case MPI_BXOR:
+            *redOp = UCC_OP_BXOR;
+            break;
+        case MPI_MAXLOC:
+            *redOp = UCC_OP_MAXLOC;
+            break;
+        case MPI_MINLOC:
+            *redOp = UCC_OP_MINLOC;
+            break;
+        default:
+            goto fn_fail;
+    }
+
+  fn_exit:
+    return mpi_errno;
+  fn_fail:
+    mpi_errno = MPI_ERR_ARG;
+    goto fn_exit;
+}
+
+static int MPIR_UCC_datatype_is_supported(MPI_Datatype dtype)
+{
+    switch (MPIR_DATATYPE_GET_RAW_INTERNAL(dtype)) {
+        case MPIR_INT8:
+        case MPIR_UINT8:
+        case MPIR_INT32:
+        case MPIR_UINT32:
+        case MPIR_INT64:
+        case MPIR_UINT64:
+        case MPIR_FLOAT16:
+        case MPIR_FLOAT32:
+        case MPIR_FLOAT64:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+static int MPIR_UCC_get_datatype(MPI_Datatype dtype, ucc_datatype_t * ucc_dtype)
+{
+    int mpi_errno = MPI_SUCCESS;
+
+    switch (MPIR_DATATYPE_GET_RAW_INTERNAL(dtype)) {
+            // Ignoring ncclChar b/c MPICH treats MPI_CHAR as MPIR_INT8 internally
+        case MPIR_INT8:
+            *ucc_dtype = UCC_DT_INT8;
+            break;
+        case MPIR_UINT8:
+            *ucc_dtype = UCC_DT_UINT8;
+            break;
+        case MPIR_INT32:
+            *ucc_dtype = UCC_DT_INT32;
+            break;
+        case MPIR_UINT32:
+            *ucc_dtype = UCC_DT_UINT32;
+            break;
+        case MPIR_INT64:
+            *ucc_dtype = UCC_DT_INT64;
+            break;
+        case MPIR_UINT64:
+            *ucc_dtype = UCC_DT_UINT64;
+            break;
+        case MPIR_FLOAT16:
+            *ucc_dtype = UCC_DT_FLOAT16;
+        case MPIR_FLOAT32:
+            *ucc_dtype = UCC_DT_FLOAT32;
+            break;
+        case MPIR_FLOAT64:
+            *ucc_dtype = UCC_DT_FLOAT64;
+            break;
+        default:
+            goto fn_fail;
+    }
+
+  fn_exit:
+    return mpi_errno;
+  fn_fail:
+    mpi_errno = MPI_ERR_ARG;
+    goto fn_exit;
 }
 
 #endif /*ENABLE UCC*/

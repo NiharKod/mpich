@@ -32,16 +32,9 @@ typedef struct {
 } MPIR_UCC_oob_ctx_t;
 
 typedef struct MPIR_UCCcomm {
-    /* Handles */
-    ucc_lib_h ucc_lib;
-    ucc_context_h ucc_context;
-    ucc_team_h ucc_team;
-
-    ucc_context_config_h ctx_config;
-    ucc_lib_config_h lib_config;
-    MPIR_UCC_oob_ctx_t oob_ctx;
-    bool initialized;
-    
+    ucc_team_h ucc_team;              
+    MPIR_UCC_oob_ctx_t oob_ctx;       
+    bool initialized; 
 } MPIR_UCCcomm;
 #endif /* Enable UCC*/
 
