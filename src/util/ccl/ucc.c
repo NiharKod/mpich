@@ -6,12 +6,12 @@
 #include "mpiimpl.h"
 #ifdef ENABLE_UCC
 
-#define UCC_CHECK(status)                                                \
+#define UCC_CHECK_OR_JUMP(status, mpi_errno)                             \
     do {                                                                 \
-        ucc_status_t ucc_status = status;                                \
-        if ((ucc_status != UCC_OK)) {                                    \
-            fprintf(stderr, "UCC error at %s:%d\n", __FILE__, __LINE__); \
-            exit(1);                                                     \
+        ucc_status_t _ucc_status = status;                               \
+        if (_ucc_status != UCC_OK) {                                     \
+            mpi_errno = MPI_ERR_OTHER;                                   \
+            MPIR_ERR_SETANDJUMP(mpi_errno, MPI_ERR_OTHER, "**ucc_error"); \
         }                                                                \
     } while (0)
 
@@ -61,41 +61,47 @@ static int MPIR_UCCcomm_init(MPIR_Comm *comm_ptr, int rank)
     ucc_status_t ucc_status;
 
     int comm_size = comm_ptr->local_size;
+    MPIR_UCCcomm *ucccomm = NULL;
 
-    /* One-time global UCC setup */
+    /* One time global UCC setup */
     if (!MPIR_UCC_global.initialized) {
-        UCC_CHECK(ucc_lib_config_read(NULL, NULL, &MPIR_UCC_global.lib_config));
+        UCC_CHECK_GOTO(ucc_lib_config_read(NULL, NULL, &MPIR_UCC_global.lib_config));
 
         ucc_lib_params_t lib_params = {
             .mask = UCC_LIB_PARAM_FIELD_THREAD_MODE,
             .thread_mode = UCC_THREAD_SINGLE
         };
 
-        UCC_CHECK(ucc_init(&lib_params, MPIR_UCC_global.lib_config, &MPIR_UCC_global.ucc_lib));
+        UCC_CHECK_GOTO(ucc_init(&lib_params, MPIR_UCC_global.lib_config,
+                                  &MPIR_UCC_global.ucc_lib), mpi_errno);
         ucc_lib_config_release(MPIR_UCC_global.lib_config);
 
-        UCC_CHECK(ucc_context_config_read(MPIR_UCC_global.ucc_lib, NULL, &MPIR_UCC_global.ctx_config));
+        UCC_CHECK_GOTO(ucc_context_config_read(MPIR_UCC_global.ucc_lib,
+                                     NULL,
+                                      &MPIR_UCC_global.ctx_config),
+                                    mpi_errno);
 
         ucc_context_params_t ctx_params = {
             .mask = UCC_CONTEXT_PARAM_FIELD_TYPE,
             .type = UCC_CONTEXT_EXCLUSIVE
         };
 
-        UCC_CHECK(ucc_context_create(MPIR_UCC_global.ucc_lib,
+        UCC_CHECK_GOTO(ucc_context_create(MPIR_UCC_global.ucc_lib,
                                      &ctx_params,
                                      MPIR_UCC_global.ctx_config,
-                                     &MPIR_UCC_global.ucc_context));
+                                     &MPIR_UCC_global.ucc_context),
+                                     mpi_errno);
         ucc_context_config_release(MPIR_UCC_global.ctx_config);
         MPIR_UCC_global.initialized = true;
     }
 
-    /* Allocate per-communicator structure */
-    MPIR_UCCcomm *ucccomm = MPL_malloc(sizeof(MPIR_UCCcomm), MPL_MEM_OTHER);
+    /* Allocate the communicator structure */
+    ucccomm = MPL_calloc(1, sizeof(MPIR_UCCcomm), MPL_MEM_OTHER);
     MPIR_ERR_CHKANDJUMP(!ucccomm, mpi_errno, MPI_ERR_OTHER, "**nomem");
 
-    /* Setup out-of-band context (OOB) */
+    /* Setup out of band context */
     ucccomm->oob_ctx.comm = comm_ptr->handle;
-    ucccomm->oob_ctx.rank = rank; 
+    ucccomm->oob_ctx.rank = rank;
 
     ucc_context_oob_coll_t oob = {
         .allgather = oob_allgather,
@@ -115,22 +121,29 @@ static int MPIR_UCCcomm_init(MPIR_Comm *comm_ptr, int rank)
     };
 
     ucc_context_h contexts[] = { MPIR_UCC_global.ucc_context };
-    UCC_CHECK(ucc_team_create_post(contexts, 1, &team_params, &ucccomm->ucc_team));
+    UCC_CHECK_GOTO(ucc_team_create_post(contexts, 1, &team_params, &ucccomm->ucc_team), mpi_errno);
 
     while (ucc_team_create_test(ucccomm->ucc_team) == UCC_INPROGRESS) {
-        UCC_CHECK(ucc_context_progress(MPIR_UCC_global.ucc_context));
+        UCC_CHECK_GOTO(ucc_context_progress(MPIR_UCC_global.ucc_context), mpi_errno);
     }
 
     ucccomm->initialized = true;
-    comm_ptr->cclcomm->uccComm = ucccomm;
+    comm_ptr->cclcomm->ucccomm = ucccomm;
+
+    goto fn_exit;
+
+fn_fail:
+    if (ucccomm) {
+        if (ucccomm->ucc_team) {
+            ucc_team_destroy(ucccomm->ucc_team);
+        }
+        MPL_free(ucccomm);
+    }
 
 fn_exit:
     return mpi_errno;
-
-fn_fail:
-    // You may want to free ucccomm or handle failure more gracefully
-    return mpi_errno;
 }
+
 
 static int MPIR_UCC_check_init_and_init(MPIR_Comm * comm_ptr, int rank)
 {
@@ -248,7 +261,7 @@ static int MPIR_UCC_get_datatype(MPI_Datatype dtype, ucc_datatype_t * ucc_dtype)
     int mpi_errno = MPI_SUCCESS;
 
     switch (MPIR_DATATYPE_GET_RAW_INTERNAL(dtype)) {
-            // Ignoring ncclChar b/c MPICH treats MPI_CHAR as MPIR_INT8 internally
+            // Ignoring UCC_DT_CHAR b/c MPICH treats MPI_CHAR as MPIR_INT8 internally
         case MPIR_INT8:
             *ucc_dtype = UCC_DT_INT8;
             break;
@@ -309,11 +322,11 @@ int MPIR_UCC_Allreduce(const void *sendbuf, void *recvbuf, MPI_Aint count, MPI_D
     //cudaError_t ret;
 
     ucc_reduction_op_t uccOp;
-    mpi_errno = MPIR_NCCL_get_red_op(op, &uccOp);
+    mpi_errno = MPIR_UCC_get_red_op(op, &uccOp);
     MPIR_ERR_CHECK(mpi_errno);
 
     ucc_datatype_t uccDatatype;
-    mpi_errno = MPIR_NCCL_get_datatype(datatype, &uccDatatype);
+    mpi_errno = MPIR_UCC_get_datatype(datatype, &uccDatatype);
     MPIR_ERR_CHECK(mpi_errno);
 
     /* Check the CCLcomm and NCCLcomm are initialized and init them if they are not */
@@ -324,7 +337,7 @@ int MPIR_UCC_Allreduce(const void *sendbuf, void *recvbuf, MPI_Aint count, MPI_D
 
     /* Setup UCC Allreduce */
 
-    ucc_coll_args_t coll_args {
+    ucc_coll_args_t coll_args = {
         .mask = 0;
         .coll_type = UCC_TYPE_ALLREDUCE,
         .src = {
@@ -336,7 +349,7 @@ int MPIR_UCC_Allreduce(const void *sendbuf, void *recvbuf, MPI_Aint count, MPI_D
             }
         },
         .dst = {
-            .info {
+            .info = {
                 .buffer = recvbuf,
                 .count = count,
                 .datatype = uccDatatype,
@@ -349,13 +362,13 @@ int MPIR_UCC_Allreduce(const void *sendbuf, void *recvbuf, MPI_Aint count, MPI_D
     };
 
     ucc_coll_req_h req;
-    UCC_CHECK(ucc_collective_init(&coll_args, &req, ucccomm->ucc_team));
-    UCC_CHECK(ucc_collective_post(req));
+    UCC_CHECK_GOTO(ucc_collective_init(&coll_args, &req, ucccomm->ucc_team), mpi_errno);
+    UCC_CHECK_GOTO(ucc_collective_post(req), mpi_errno);
     
-    while (ucc_collecctive_test(req) == UCC_INPROGRESS) {
-        UCC_CHECK(ucc_context_progress(MPIR_UCC_global.ucc_context));
+    while (ucc_collective_test(req) == UCC_INPROGRESS) {
+        UCC_CHECK_GOTO(ucc_context_progress(MPIR_UCC_global.ucc_context), mpi_errno);
     }
-    UCC_CHECK(ucc_collective_finalize(req));
+    UCC_CHECK_GOTO(ucc_collective_finalize(req), mpi_errno);
 
   fn_exit:
     return mpi_errno;
@@ -368,14 +381,9 @@ int MPIR_UCCcomm_free(MPIR_Comm * comm)
     int mpi_errno = MPI_SUCCESS;
     MPIR_Assert(comm->cclcomm->ucccomm);
     MPIR_CCLcomm *cclcomm = comm->cclcomm;
-
-    ret = cudaStreamSynchronize(cclcomm->ncclcomm->stream);
-    CUDA_ERR_CHECK(ret);
-    ret = ncclCommDestroy(cclcomm->ncclcomm->ncclcomm);
-    CUDA_ERR_CHECK(ret);
-    ret = cudaStreamDestroy(cclcomm->ncclcomm->stream);
-    CUDA_ERR_CHECK(ret);
-
+    UCC_CHECK_GOTO(ucc_team_destroy(comm->ucccomm->ucc_team), mpi_errno);
+    UCC_CHECK_GOTO(ucc_context_destroy(MPIR_UCC_global->ucc_context), mpi_errno);
+    UCC_CHECK_GOTO(ucc_finalize(MPIR_UCC_global->ucc_lib), mpi_errno);
     MPL_free(cclcomm->ucccomm);
 
   fn_exit:

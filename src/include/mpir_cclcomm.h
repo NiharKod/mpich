@@ -45,7 +45,7 @@ typedef struct MPIR_CCLcomm {
     MPIR_NCCLcomm *ncclcomm;
 #endif                          /*ENABLE_NCCL */
 #ifdef ENABLE_UCC
-    MPIR_UCCcomm *uccComm;
+    MPIR_UCCcomm *ucccomm;
 #endif                          /*ENABLE_UCC*/
 } MPIR_CCLcomm;
 
