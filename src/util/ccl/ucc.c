@@ -21,13 +21,13 @@ typedef struct {
     ucc_context_h ucc_context;
     ucc_lib_config_h lib_config;
     ucc_context_config_h ctx_config;
-} MPIR_UCC_global_state_t;
+} MPIR_UCC_global_state_t
 
-static MPIR_UCC_global_state_t MPIR_UCC_global = {
+MPIR_UCC_global_state_t MPIR_UCC_global = {
     .initialized = false
 };
 
-ucc_status_t oob_allgather(void *sbuf, void *rbuf, size_t msglen,
+static ucc_status_t oob_allgather(void *sbuf, void *rbuf, size_t msglen,
                            void *coll_ctx, void **req)
 {
    MPIR_UCC_oob_ctx_t *ctx = (MPIR_UCC_oob_ctx_t *)coll_ctx;
@@ -42,14 +42,14 @@ ucc_status_t oob_allgather(void *sbuf, void *rbuf, size_t msglen,
    return UCC_OK;
 }
 
-ucc_status_t oob_test(void *req)
+static ucc_status_t oob_test(void *req)
 {
     int completed;
     int mpi_errno = MPIR_Test_impl((MPI_Request *)req, &completed, MPI_STATUS_IGNORE);
     return (mpi_errno == MPI_SUCCESS && completed) ? UCC_OK : UCC_INPROGRESS;
 }
 
-ucc_status_t oob_free(void *req)
+static ucc_status_t oob_free(void *req)
 {
     MPIR_Request_free((MPIR_Request *)req);
     return UCC_OK;
@@ -339,7 +339,7 @@ int MPIR_UCC_Allreduce(const void *sendbuf, void *recvbuf, MPI_Aint count, MPI_D
     /* Setup UCC Allreduce */
 
     ucc_coll_args_t coll_args = {
-        .mask = 0;
+        .mask = 0,
         .coll_type = UCC_TYPE_ALLREDUCE,
         .src = {
             .info = {
@@ -397,19 +397,4 @@ fn_fail:
     goto fn_exit;
 }
 
-int MPIR_UCC_global_finalize()
-{
-    int mpi_errno = MPI_SUCCESS;
-
-    if (MPIR_UCC_global.initialized) {
-        UCC_CHECK_OR_JUMP(ucc_context_destroy(MPIR_UCC_global.ucc_context), mpi_errno);
-        UCC_CHECK_OR_JUMP(ucc_finalize(MPIR_UCC_global.ucc_lib), mpi_errno);
-        MPIR_UCC_global.initialized = false;
-    }
-
-fn_exit:
-    return mpi_errno;
-fn_fail:
-    goto fn_exit;
-}
 #endif /*ENABLE UCC*/

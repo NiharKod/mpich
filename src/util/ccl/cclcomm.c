@@ -19,11 +19,11 @@ int MPIR_CCLcomm_init(MPIR_Comm * comm)
 
 #ifdef ENABLE_NCCL
     cclcomm->ncclcomm = 0;      // Initialize the ncclcomm to 0
-#endif /*ENABLE_NCCL */
+#endif /* ENABLE_NCCL */
 
 #ifdef ENABLE_UCC
     cclcomm->ucccomm = 0;
-#endif /* EANBLE_UCC */
+#endif /* ENABLE_UCC */
 
   fn_exit:
     return mpi_errno;
@@ -44,7 +44,7 @@ int MPIR_CCLcomm_free(MPIR_Comm * comm_ptr)
             goto fn_fail;
         }
     }
-#endif
+#endif /* ENABLE_NCCL */
 
 #ifdef ENABLE_UCC
     if (comm_ptr->cclcomm->ucccomm) {
@@ -53,7 +53,7 @@ int MPIR_CCLcomm_free(MPIR_Comm * comm_ptr)
             goto fn_fail;
         }
     }
-#endif
+#endif /* ENABLE_UCC */
 
     MPL_free(comm_ptr->cclcomm);
 
@@ -61,6 +61,27 @@ int MPIR_CCLcomm_free(MPIR_Comm * comm_ptr)
     return mpi_errno;
   fn_fail:
     goto fn_exit;
+}
+
+int MPIR_CCL_finalize(void) {
+   int mpi_errno = MPI_SUCCESS;
+
+#ifdef ENABLE_UCC
+    if (MPIR_UCC_global.initialized) {
+        ucc_status_t status;
+        status = ucc_context_destroy(MPIR_UCC_global.ucc_context);
+        if (status != UCC_OK)
+            mpi_errno = MPI_ERR_OTHER;
+
+        status = ucc_finalize(MPIR_UCC_global.ucc_lib);
+        if (status != UCC_OK)
+            mpi_errno = MPI_ERR_OTHER;
+
+        MPIR_UCC_global.initialized = false;
+    } 
+#endif /* ENABLE_UCC */
+    return mpi_errno;
+
 }
 
 #endif /* ENABLE_CCLCOMM */
