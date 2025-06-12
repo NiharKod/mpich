@@ -21,6 +21,10 @@ int MPIR_CCLcomm_init(MPIR_Comm * comm)
     cclcomm->ncclcomm = 0;      // Initialize the ncclcomm to 0
 #endif /*ENABLE_NCCL */
 
+#ifdef ENABLE_UCC
+    cclcomm->ucccomm = 0;
+#endif /* EANBLE_UCC */
+
   fn_exit:
     return mpi_errno;
   fn_fail:
@@ -36,6 +40,15 @@ int MPIR_CCLcomm_free(MPIR_Comm * comm_ptr)
 #ifdef ENABLE_NCCL
     if (comm_ptr->cclcomm->ncclcomm) {
         mpi_errno = MPIR_NCCLcomm_free(comm_ptr);
+        if (mpi_errno != MPL_SUCCESS) {
+            goto fn_fail;
+        }
+    }
+#endif
+
+#ifdef ENABLE_UCC
+    if (comm_ptr->cclcomm->ucccomm) {
+        mpi_errno = MPIR_UCCcomm_free(comm_ptr);
         if (mpi_errno != MPL_SUCCESS) {
             goto fn_fail;
         }

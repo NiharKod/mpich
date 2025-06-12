@@ -65,18 +65,18 @@ static int MPIR_UCCcomm_init(MPIR_Comm *comm_ptr, int rank)
 
     /* One time global UCC setup */
     if (!MPIR_UCC_global.initialized) {
-        UCC_CHECK_GOTO(ucc_lib_config_read(NULL, NULL, &MPIR_UCC_global.lib_config));
+        UCC_CHECK_OR_JUMP(ucc_lib_config_read(NULL, NULL, &MPIR_UCC_global.lib_config));
 
         ucc_lib_params_t lib_params = {
             .mask = UCC_LIB_PARAM_FIELD_THREAD_MODE,
             .thread_mode = UCC_THREAD_SINGLE
         };
 
-        UCC_CHECK_GOTO(ucc_init(&lib_params, MPIR_UCC_global.lib_config,
+        UCC_CHECK_OR_JUMP(ucc_init(&lib_params, MPIR_UCC_global.lib_config,
                                   &MPIR_UCC_global.ucc_lib), mpi_errno);
         ucc_lib_config_release(MPIR_UCC_global.lib_config);
 
-        UCC_CHECK_GOTO(ucc_context_config_read(MPIR_UCC_global.ucc_lib,
+        UCC_CHECK_OR_JUMP(ucc_context_config_read(MPIR_UCC_global.ucc_lib,
                                      NULL,
                                       &MPIR_UCC_global.ctx_config),
                                     mpi_errno);
@@ -86,7 +86,7 @@ static int MPIR_UCCcomm_init(MPIR_Comm *comm_ptr, int rank)
             .type = UCC_CONTEXT_EXCLUSIVE
         };
 
-        UCC_CHECK_GOTO(ucc_context_create(MPIR_UCC_global.ucc_lib,
+        UCC_CHECK_OR_JUMP(ucc_context_create(MPIR_UCC_global.ucc_lib,
                                      &ctx_params,
                                      MPIR_UCC_global.ctx_config,
                                      &MPIR_UCC_global.ucc_context),
@@ -121,10 +121,10 @@ static int MPIR_UCCcomm_init(MPIR_Comm *comm_ptr, int rank)
     };
 
     ucc_context_h contexts[] = { MPIR_UCC_global.ucc_context };
-    UCC_CHECK_GOTO(ucc_team_create_post(contexts, 1, &team_params, &ucccomm->ucc_team), mpi_errno);
+    UCC_CHECK_OR_JUMP(ucc_team_create_post(contexts, 1, &team_params, &ucccomm->ucc_team), mpi_errno);
 
     while (ucc_team_create_test(ucccomm->ucc_team) == UCC_INPROGRESS) {
-        UCC_CHECK_GOTO(ucc_context_progress(MPIR_UCC_global.ucc_context), mpi_errno);
+        UCC_CHECK_OR_JUMP(ucc_context_progress(MPIR_UCC_global.ucc_context), mpi_errno);
     }
 
     ucccomm->initialized = true;
@@ -282,6 +282,7 @@ static int MPIR_UCC_get_datatype(MPI_Datatype dtype, ucc_datatype_t * ucc_dtype)
             break;
         case MPIR_FLOAT16:
             *ucc_dtype = UCC_DT_FLOAT16;
+            break;
         case MPIR_FLOAT32:
             *ucc_dtype = UCC_DT_FLOAT32;
             break;
@@ -306,7 +307,7 @@ static int MPIR_UCC_get_datatype(MPI_Datatype dtype, ucc_datatype_t * ucc_dtype)
 int MPIR_UCC_check_requirements_red_op(const void *sendbuf, void *recvbuf, MPI_Datatype datatype,
                                         MPI_Op op)
 {
-    /* NCCL requires a supported red op and datatype, and both bufs must be on GPU */
+    /* UCC requires a supported red op and datatype, and both bufs must be on GPU */
     if (!MPIR_UCC_red_op_is_supported(op) || !MPIR_UCC_datatype_is_supported(datatype) ||
         !MPIR_CCL_check_both_gpu_bufs(sendbuf, recvbuf)) {
         return 0;
@@ -329,11 +330,11 @@ int MPIR_UCC_Allreduce(const void *sendbuf, void *recvbuf, MPI_Aint count, MPI_D
     mpi_errno = MPIR_UCC_get_datatype(datatype, &uccDatatype);
     MPIR_ERR_CHECK(mpi_errno);
 
-    /* Check the CCLcomm and NCCLcomm are initialized and init them if they are not */
+    /* Check the CCLcomm and UCCcomm are initialized and init them if they are not */
 
     mpi_errno = MPIR_UCC_check_init_and_init(comm_ptr, comm_ptr->rank);
     MPIR_ERR_CHECK(mpi_errno);
-    MPIR_NCCLcomm *ucccomm = comm_ptr->cclcomm->ucccomm;
+    MPIR_UCCcomm *ucccomm = comm_ptr->cclcomm->ucccomm;
 
     /* Setup UCC Allreduce */
 
@@ -356,19 +357,20 @@ int MPIR_UCC_Allreduce(const void *sendbuf, void *recvbuf, MPI_Aint count, MPI_D
                 .mem_type = UCC_MEMORY_TYPE_UNKNOWN
             }
         },
-        .op = uccOp;
-        .flags = UCC_COLL_ARGS_FLAG_CONTIF_SRC_BUFFER |
+        .op = uccOp,
+        .flags = UCC_COLL_ARGS_FLAG_CONTIG_SRC_BUFFER |
                  UCC_COLL_ARGS_FLAG_CONTIG_DST_BUFFER
     };
 
     ucc_coll_req_h req;
-    UCC_CHECK_GOTO(ucc_collective_init(&coll_args, &req, ucccomm->ucc_team), mpi_errno);
-    UCC_CHECK_GOTO(ucc_collective_post(req), mpi_errno);
+    UCC_CHECK_OR_JUMP(ucc_collective_init(&coll_args, &req, ucccomm->ucc_team), mpi_errno);
+    UCC_CHECK_OR_JUMP(ucc_collective_post(req), mpi_errno);
     
     while (ucc_collective_test(req) == UCC_INPROGRESS) {
-        UCC_CHECK_GOTO(ucc_context_progress(MPIR_UCC_global.ucc_context), mpi_errno);
+        UCC_CHECK_OR_JUMP(ucc_context_progress(MPIR_UCC_global.ucc_context), mpi_errno);
     }
-    UCC_CHECK_GOTO(ucc_collective_finalize(req), mpi_errno);
+    
+    UCC_CHECK_OR_JUMP(ucc_collective_finalize(req), mpi_errno);
 
   fn_exit:
     return mpi_errno;
@@ -379,16 +381,35 @@ int MPIR_UCC_Allreduce(const void *sendbuf, void *recvbuf, MPI_Aint count, MPI_D
 int MPIR_UCCcomm_free(MPIR_Comm * comm)
 {
     int mpi_errno = MPI_SUCCESS;
-    MPIR_Assert(comm->cclcomm->ucccomm);
-    MPIR_CCLcomm *cclcomm = comm->cclcomm;
-    UCC_CHECK_GOTO(ucc_team_destroy(comm->ucccomm->ucc_team), mpi_errno);
-    UCC_CHECK_GOTO(ucc_context_destroy(MPIR_UCC_global->ucc_context), mpi_errno);
-    UCC_CHECK_GOTO(ucc_finalize(MPIR_UCC_global->ucc_lib), mpi_errno);
-    MPL_free(cclcomm->ucccomm);
+    MPIR_Assert(comm->cclcomm && comm->cclcomm->ucccomm);
+    MPIR_UCCcomm *ucccomm = comm->cclcomm->ucccomm;
 
-  fn_exit:
+    if (ucccomm->ucc_team) {
+        UCC_CHECK_OR_JUMP(ucc_team_destroy(ucccomm->ucc_team), mpi_errno);
+    }
+
+    MPL_free(ucccomm);
+    comm->cclcomm->ucccomm = NULL;
+
+fn_exit:
     return mpi_errno;
-  fn_fail:
+fn_fail:
+    goto fn_exit;
+}
+
+int MPIR_UCC_global_finalize()
+{
+    int mpi_errno = MPI_SUCCESS;
+
+    if (MPIR_UCC_global.initialized) {
+        UCC_CHECK_OR_JUMP(ucc_context_destroy(MPIR_UCC_global.ucc_context), mpi_errno);
+        UCC_CHECK_OR_JUMP(ucc_finalize(MPIR_UCC_global.ucc_lib), mpi_errno);
+        MPIR_UCC_global.initialized = false;
+    }
+
+fn_exit:
+    return mpi_errno;
+fn_fail:
     goto fn_exit;
 }
 #endif /*ENABLE UCC*/
