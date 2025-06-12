@@ -3914,7 +3914,6 @@ if test "$GPU_SUPPORT" = "HIP" || test "$GPU_SUPPORT" = "CUDA" ; then
     fi
 fi
 
-
 # Checkpointing
 AC_ARG_ENABLE(checkpointing,
     [AS_HELP_STRING([--enable-checkpointing], [Enable application checkpointing])],
@@ -3934,7 +3933,6 @@ if test -z "$NVCC" ; then
 fi
 
 # CCLs
-have_ccl=no
 
 if test $GPU_SUPPORT = "CUDA" ; then
     PAC_CHECK_HEADER_LIB_OPTIONAL([nccl], [nccl.h], [nccl], [ncclCommInitAll])

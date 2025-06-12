@@ -6,22 +6,13 @@
 #include "mpiimpl.h"
 #ifdef ENABLE_UCC
 
-#define UCC_CHECK_OR_JUMP(status, mpi_errno)                             \
-    do {                                                                 \
-        ucc_status_t _ucc_status = status;                               \
-        if (_ucc_status != UCC_OK) {                                     \
-            mpi_errno = MPI_ERR_OTHER;                                   \
-            MPIR_ERR_SETANDJUMP(mpi_errno, MPI_ERR_OTHER, "**ucc_error"); \
-        }                                                                \
+#define UCC_CHECK_OR_JUMP(status, mpi_errno)   \
+    do {                                       \
+        if ((status) != UCC_OK) {              \
+            mpi_errno = MPI_ERR_OTHER;         \
+            goto fn_fail;                      \
+        }                                      \
     } while (0)
-
-typedef struct {
-    bool initialized;
-    ucc_lib_h ucc_lib;
-    ucc_context_h ucc_context;
-    ucc_lib_config_h lib_config;
-    ucc_context_config_h ctx_config;
-} MPIR_UCC_global_state_t
 
 MPIR_UCC_global_state_t MPIR_UCC_global = {
     .initialized = false
@@ -45,7 +36,7 @@ static ucc_status_t oob_allgather(void *sbuf, void *rbuf, size_t msglen,
 static ucc_status_t oob_test(void *req)
 {
     int completed;
-    int mpi_errno = MPIR_Test_impl((MPI_Request *)req, &completed, MPI_STATUS_IGNORE);
+    int mpi_errno = MPIR_Test_impl((MPIR_Request *)req, &completed, MPI_STATUS_IGNORE);
     return (mpi_errno == MPI_SUCCESS && completed) ? UCC_OK : UCC_INPROGRESS;
 }
 
@@ -65,7 +56,7 @@ static int MPIR_UCCcomm_init(MPIR_Comm *comm_ptr, int rank)
 
     /* One time global UCC setup */
     if (!MPIR_UCC_global.initialized) {
-        UCC_CHECK_OR_JUMP(ucc_lib_config_read(NULL, NULL, &MPIR_UCC_global.lib_config));
+        UCC_CHECK_OR_JUMP(ucc_lib_config_read(NULL, NULL, &MPIR_UCC_global.lib_config), mpi_errno);
 
         ucc_lib_params_t lib_params = {
             .mask = UCC_LIB_PARAM_FIELD_THREAD_MODE,
@@ -100,7 +91,7 @@ static int MPIR_UCCcomm_init(MPIR_Comm *comm_ptr, int rank)
     MPIR_ERR_CHKANDJUMP(!ucccomm, mpi_errno, MPI_ERR_OTHER, "**nomem");
 
     /* Setup out of band context */
-    ucccomm->oob_ctx.comm = comm_ptr->handle;
+    ucccomm->oob_ctx.comm = comm_ptr;
     ucccomm->oob_ctx.rank = rank;
 
     ucc_context_oob_coll_t oob = {
@@ -340,10 +331,10 @@ int MPIR_UCC_Allreduce(const void *sendbuf, void *recvbuf, MPI_Aint count, MPI_D
 
     ucc_coll_args_t coll_args = {
         .mask = 0,
-        .coll_type = UCC_TYPE_ALLREDUCE,
+        .coll_type = UCC_COLL_TYPE_ALLREDUCE,
         .src = {
             .info = {
-                .buffer = sendbuf,
+                .buffer = (void *)sendbuf,
                 .count = count,
                 .datatype = uccDatatype,
                 .mem_type = UCC_MEMORY_TYPE_UNKNOWN
@@ -351,7 +342,7 @@ int MPIR_UCC_Allreduce(const void *sendbuf, void *recvbuf, MPI_Aint count, MPI_D
         },
         .dst = {
             .info = {
-                .buffer = recvbuf,
+                .buffer = (void *)recvbuf,
                 .count = count,
                 .datatype = uccDatatype,
                 .mem_type = UCC_MEMORY_TYPE_UNKNOWN

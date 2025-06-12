@@ -14,7 +14,15 @@
 
 #ifdef ENABLE_UCC
 #include <ucc/api/ucc.h>
-extern MPIR_UCC_global_state_t MPIR_UCC_global;
+typedef struct MPIR_UCC_global_state {
+    bool initialized;
+    ucc_lib_h ucc_lib;
+    ucc_context_h ucc_context;
+    ucc_lib_config_h lib_config;
+    ucc_context_config_h ctx_config;
+} MPIR_UCC_global_state_t;
+
+extern MPIR_UCC_global_state_t MPIR_UCC_global;;
 #endif
 
 #ifdef ENABLE_NCCL
@@ -28,7 +36,7 @@ typedef struct MPIR_NCCLcomm {
 #ifdef ENABLE_UCC
 
 typedef struct {
-    MPI_Comm comm;
+    MPI_Comm *comm;
     int rank;
 } MPIR_UCC_oob_ctx_t;
 
