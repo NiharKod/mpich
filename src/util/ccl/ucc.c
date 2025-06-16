@@ -22,10 +22,12 @@ static ucc_status_t oob_allgather(void *sbuf, void *rbuf, size_t msglen,
                            void *coll_ctx, void **req)
 {
    MPIR_UCC_oob_ctx_t *ctx = (MPIR_UCC_oob_ctx_t *)coll_ctx;
-   MPI_Request *mpi_req = NULL;
-   int mpi_errno = MPIR_Iallgather_impl(sbuf, msglen, MPI_BYTE,
-                  rbuf, msglen, MPI_BYTE,
-                  ctx->comm, &mpi_req);
+   MPIR_Request *mpi_req = NULL;
+    int mpi_errno = MPIR_Iallgather_impl(sbuf, (MPI_Aint)msglen, MPIR_INT8,
+                   rbuf, (MPI_Aint)msglen, MPIR_INT8,
+                   ctx->comm, &mpi_req);
+
+   printf("[UCC OOB] Rank %d: Performing Iallgather with msglen = %zu\n", ctx->rank, msglen);
    if (mpi_errno != MPI_SUCCESS || !mpi_req) {
       return UCC_ERR_NO_RESOURCE;
    }
@@ -54,6 +56,23 @@ static int MPIR_UCCcomm_init(MPIR_Comm *comm_ptr, int rank)
     int comm_size = comm_ptr->local_size;
     MPIR_UCCcomm *ucccomm = NULL;
 
+    ucccomm = MPL_calloc(1, sizeof(MPIR_UCCcomm), MPL_MEM_OTHER);
+    MPIR_ERR_CHKANDJUMP(!ucccomm, mpi_errno, MPI_ERR_OTHER, "**nomem");
+
+    /* Setup out of band context information that is needed by both context and team */
+    ucccomm->oob_ctx.comm = comm_ptr;
+    ucccomm->oob_ctx.rank = rank;
+
+    ucc_context_oob_coll_t oob = {
+        .allgather = oob_allgather,
+        .req_test  = oob_test,
+        .req_free  = oob_free,
+        .coll_info = &ucccomm->oob_ctx,
+        .n_oob_eps = (uint32_t)comm_size, 
+        .oob_ep    = (uint32_t)rank       
+    };
+
+
     /* One time global UCC setup */
     if (!MPIR_UCC_global.initialized) {
         UCC_CHECK_OR_JUMP(ucc_lib_config_read(NULL, NULL, &MPIR_UCC_global.lib_config), mpi_errno);
@@ -68,47 +87,30 @@ static int MPIR_UCCcomm_init(MPIR_Comm *comm_ptr, int rank)
         ucc_lib_config_release(MPIR_UCC_global.lib_config);
 
         UCC_CHECK_OR_JUMP(ucc_context_config_read(MPIR_UCC_global.ucc_lib,
-                                     NULL,
-                                      &MPIR_UCC_global.ctx_config),
-                                    mpi_errno);
+                                                  NULL, &MPIR_UCC_global.ctx_config),
+                                                  mpi_errno);
 
         ucc_context_params_t ctx_params = {
-            .mask = UCC_CONTEXT_PARAM_FIELD_TYPE,
-            .type = UCC_CONTEXT_EXCLUSIVE
+            .mask = UCC_CONTEXT_PARAM_FIELD_TYPE | UCC_CONTEXT_PARAM_FIELD_OOB, 
+            .type = UCC_CONTEXT_EXCLUSIVE,
+            .oob  = oob                         
         };
 
         UCC_CHECK_OR_JUMP(ucc_context_create(MPIR_UCC_global.ucc_lib,
-                                     &ctx_params,
-                                     MPIR_UCC_global.ctx_config,
-                                     &MPIR_UCC_global.ucc_context),
-                                     mpi_errno);
+                                             &ctx_params, MPIR_UCC_global.ctx_config,
+                                             &MPIR_UCC_global.ucc_context),
+                                             mpi_errno);
         ucc_context_config_release(MPIR_UCC_global.ctx_config);
         MPIR_UCC_global.initialized = true;
     }
 
-    /* Allocate the communicator structure */
-    ucccomm = MPL_calloc(1, sizeof(MPIR_UCCcomm), MPL_MEM_OTHER);
-    MPIR_ERR_CHKANDJUMP(!ucccomm, mpi_errno, MPI_ERR_OTHER, "**nomem");
-
-    /* Setup out of band context */
-    ucccomm->oob_ctx.comm = comm_ptr;
-    ucccomm->oob_ctx.rank = rank;
-
-    ucc_context_oob_coll_t oob = {
-        .allgather = oob_allgather,
-        .req_test  = oob_test,
-        .req_free  = oob_free,
-        .coll_info = &ucccomm->oob_ctx,
-        .n_oob_eps = comm_size,
-        .oob_ep    = rank
-    };
 
     /* Team creation */
     ucc_team_params_t team_params = {
         .mask = UCC_TEAM_PARAM_FIELD_EP | UCC_TEAM_PARAM_FIELD_EP_RANGE | UCC_TEAM_PARAM_FIELD_OOB,
         .ep = rank,
         .ep_range = UCC_COLLECTIVE_EP_RANGE_CONTIG,
-        .oob = oob
+        .oob = oob 
     };
 
     ucc_context_h contexts[] = { MPIR_UCC_global.ucc_context };
@@ -207,7 +209,7 @@ static int MPIR_UCC_get_red_op(MPI_Op op, ucc_reduction_op_t * redOp)
             *redOp = UCC_OP_BAND;
             break;
         case MPI_BOR:
-            *redOp = UCC_OP_BXOR;
+            *redOp = UCC_OP_BOR;
             break;
         case MPI_BXOR:
             *redOp = UCC_OP_BXOR;
@@ -252,7 +254,6 @@ static int MPIR_UCC_get_datatype(MPI_Datatype dtype, ucc_datatype_t * ucc_dtype)
     int mpi_errno = MPI_SUCCESS;
 
     switch (MPIR_DATATYPE_GET_RAW_INTERNAL(dtype)) {
-            // Ignoring UCC_DT_CHAR b/c MPICH treats MPI_CHAR as MPIR_INT8 internally
         case MPIR_INT8:
             *ucc_dtype = UCC_DT_INT8;
             break;
@@ -298,7 +299,6 @@ static int MPIR_UCC_get_datatype(MPI_Datatype dtype, ucc_datatype_t * ucc_dtype)
 int MPIR_UCC_check_requirements_red_op(const void *sendbuf, void *recvbuf, MPI_Datatype datatype,
                                         MPI_Op op)
 {
-    /* UCC requires a supported red op and datatype, and both bufs must be on GPU */
     if (!MPIR_UCC_red_op_is_supported(op) || !MPIR_UCC_datatype_is_supported(datatype) ||
         !MPIR_CCL_check_both_gpu_bufs(sendbuf, recvbuf)) {
         return 0;
@@ -307,11 +307,11 @@ int MPIR_UCC_check_requirements_red_op(const void *sendbuf, void *recvbuf, MPI_D
     return 1;
 }
 
+
 int MPIR_UCC_Allreduce(const void *sendbuf, void *recvbuf, MPI_Aint count, MPI_Datatype datatype,
                         MPI_Op op, MPIR_Comm * comm_ptr, MPIR_Errflag_t errflag)
 {
     int mpi_errno = MPI_SUCCESS;
-    //cudaError_t ret;
 
     ucc_reduction_op_t uccOp;
     mpi_errno = MPIR_UCC_get_red_op(op, &uccOp);
@@ -321,16 +321,14 @@ int MPIR_UCC_Allreduce(const void *sendbuf, void *recvbuf, MPI_Aint count, MPI_D
     mpi_errno = MPIR_UCC_get_datatype(datatype, &uccDatatype);
     MPIR_ERR_CHECK(mpi_errno);
 
-    /* Check the CCLcomm and UCCcomm are initialized and init them if they are not */
 
     mpi_errno = MPIR_UCC_check_init_and_init(comm_ptr, comm_ptr->rank);
     MPIR_ERR_CHECK(mpi_errno);
     MPIR_UCCcomm *ucccomm = comm_ptr->cclcomm->ucccomm;
 
-    /* Setup UCC Allreduce */
 
     ucc_coll_args_t coll_args = {
-        .mask = 0,
+        .mask = UCC_COLL_ARGS_FIELD_FLAGS,
         .coll_type = UCC_COLL_TYPE_ALLREDUCE,
         .src = {
             .info = {
@@ -368,6 +366,8 @@ int MPIR_UCC_Allreduce(const void *sendbuf, void *recvbuf, MPI_Aint count, MPI_D
   fn_fail:
     goto fn_exit;
 }
+
+
 
 int MPIR_UCCcomm_free(MPIR_Comm * comm)
 {

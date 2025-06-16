@@ -22,7 +22,7 @@ typedef struct MPIR_UCC_global_state {
     ucc_context_config_h ctx_config;
 } MPIR_UCC_global_state_t;
 
-extern MPIR_UCC_global_state_t MPIR_UCC_global;;
+extern MPIR_UCC_global_state_t MPIR_UCC_global;
 #endif
 
 #ifdef ENABLE_NCCL
@@ -36,7 +36,7 @@ typedef struct MPIR_NCCLcomm {
 #ifdef ENABLE_UCC
 
 typedef struct {
-    MPI_Comm *comm;
+    MPIR_Comm *comm;
     int rank;
 } MPIR_UCC_oob_ctx_t;
 
