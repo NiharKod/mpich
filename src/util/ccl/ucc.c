@@ -107,7 +107,9 @@ static int MPIR_UCCcomm_init(MPIR_Comm *comm_ptr, int rank)
 
     /* Team creation */
     ucc_team_params_t team_params = {
-        .mask = UCC_TEAM_PARAM_FIELD_EP | UCC_TEAM_PARAM_FIELD_EP_RANGE | UCC_TEAM_PARAM_FIELD_OOB,
+        .mask = UCC_TEAM_PARAM_FIELD_EP |
+          UCC_TEAM_PARAM_FIELD_EP_RANGE | 
+          UCC_TEAM_PARAM_FIELD_OOB,
         .ep = rank,
         .ep_range = UCC_COLLECTIVE_EP_RANGE_CONTIG,
         .oob = oob 
@@ -116,9 +118,13 @@ static int MPIR_UCCcomm_init(MPIR_Comm *comm_ptr, int rank)
     ucc_context_h contexts[] = { MPIR_UCC_global.ucc_context };
     UCC_CHECK_OR_JUMP(ucc_team_create_post(contexts, 1, &team_params, &ucccomm->ucc_team), mpi_errno);
 
-    while (ucc_team_create_test(ucccomm->ucc_team) == UCC_INPROGRESS) {
+    do {
         UCC_CHECK_OR_JUMP(ucc_context_progress(MPIR_UCC_global.ucc_context), mpi_errno);
-    }
+    } while (ucc_team_create_test(ucccomm->ucc_team) == UCC_INPROGRESS);
+
+        // while (ucc_team_create_test(ucccomm->ucc_team) == UCC_INPROGRESS) {
+        //     UCC_CHECK_OR_JUMP(ucc_context_progress(MPIR_UCC_global.ucc_context), mpi_errno);
+        // }
 
     ucccomm->initialized = true;
     comm_ptr->cclcomm->ucccomm = ucccomm;
@@ -321,11 +327,10 @@ int MPIR_UCC_Allreduce(const void *sendbuf, void *recvbuf, MPI_Aint count, MPI_D
     mpi_errno = MPIR_UCC_get_datatype(datatype, &uccDatatype);
     MPIR_ERR_CHECK(mpi_errno);
 
-
+    /* Initialize UCC libraries */
     mpi_errno = MPIR_UCC_check_init_and_init(comm_ptr, comm_ptr->rank);
     MPIR_ERR_CHECK(mpi_errno);
     MPIR_UCCcomm *ucccomm = comm_ptr->cclcomm->ucccomm;
-
 
     ucc_coll_args_t coll_args = {
         .mask = UCC_COLL_ARGS_FIELD_FLAGS,
