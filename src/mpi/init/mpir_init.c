@@ -505,9 +505,6 @@ int MPII_Finalize(MPIR_Session * session_ptr)
 int MPIR_Finalize_impl(void)
 {
 #ifdef ENABLE_CCLCOMM
-    printf("Finalize CCL");
-   //int mpi_errno = MPIR_CCL_finalize();
-    //MPIR_ERR_CHECK(mpi_errno);
 #endif /* ENABLE_CCLCOMM */
     return MPII_Finalize(NULL);
 }

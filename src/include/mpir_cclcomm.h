@@ -40,10 +40,19 @@ typedef struct {
     int rank;
 } MPIR_UCC_oob_ctx_t;
 
+// typedef struct MPIR_UCCcomm {
+//     ucc_team_h ucc_team;              
+//     MPIR_UCC_oob_ctx_t oob_ctx;       
+//     bool initialized; 
+// } MPIR_UCCcomm;
+
 typedef struct MPIR_UCCcomm {
-    ucc_team_h ucc_team;              
-    MPIR_UCC_oob_ctx_t oob_ctx;       
-    bool initialized; 
+    ucc_team_h ucc_team;
+    MPIR_UCC_oob_ctx_t oob_ctx;
+    ucc_context_h ucc_context;
+    ucc_lib_h ucc_lib;
+    ucc_context_config_h ctx_config;
+    bool initialized;
 } MPIR_UCCcomm;
 #endif /* Enable UCC*/
 
@@ -59,9 +68,9 @@ typedef struct MPIR_CCLcomm {
 } MPIR_CCLcomm;
 
 int MPIR_CCL_check_both_gpu_bufs(const void *sendbuf, void *recvbuf);
-int MPIR_CCLcomm_init(MPIR_Comm * comm);
-int MPIR_CCLcomm_free(MPIR_Comm * comm);
-int MPIR_CCL_finalize(void);
+int MPIR_CCLcomm_init(MPIR_Comm *comm);
+int MPIR_CCLcomm_free(MPIR_Comm *comm);
+int MPIR_CCL_finalize(MPIR_Comm *comm);
 
 #ifdef ENABLE_NCCL
 int MPIR_NCCL_check_requirements_red_op(const void *sendbuf, void *recvbuf, MPI_Datatype datatype,

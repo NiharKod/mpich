@@ -1,8 +1,3 @@
-/*
- * Copyright (C) by Argonne National Laboratory
- *     See COPYRIGHT in top-level directory
-*/
-
 #include "mpiimpl.h"
 #ifdef ENABLE_UCC
 
@@ -14,32 +9,48 @@
         }                                      \
     } while (0)
 
-MPIR_UCC_global_state_t MPIR_UCC_global = {
-    .initialized = false
-};
-
 static ucc_status_t oob_allgather(void *sbuf, void *rbuf, size_t msglen,
-                           void *coll_ctx, void **req)
+                                  void *coll_ctx, void **req)
 {
-   MPIR_UCC_oob_ctx_t *ctx = (MPIR_UCC_oob_ctx_t *)coll_ctx;
-   MPIR_Request *mpi_req = NULL;
-    int mpi_errno = MPIR_Iallgather_impl(sbuf, (MPI_Aint)msglen, MPIR_INT8,
-                   rbuf, (MPI_Aint)msglen, MPIR_INT8,
-                   ctx->comm, &mpi_req);
+    MPIR_UCC_oob_ctx_t *ctx = coll_ctx;
+    MPIR_Request *mpi_req = NULL;
 
-   printf("[UCC OOB] Rank %d: Performing Iallgather with msglen = %zu\n", ctx->rank, msglen);
-   if (mpi_errno != MPI_SUCCESS || !mpi_req) {
-      return UCC_ERR_NO_RESOURCE;
-   }
-   *req = (void *)mpi_req;
-   return UCC_OK;
+    printf("[UCC OOB] Rank %d: Performing Iallgather with msglen = %zu\n", ctx->rank, msglen);
+    printf("[UCC OOB] Rank %d: sbuf = %p, rbuf = %p\n", ctx->rank, sbuf, rbuf);
+
+    size_t print_count = msglen < 8 ? msglen : 8;
+    for (size_t i = 0; i < print_count; i++) {
+        printf("[UCC OOB] Rank %d sbuf[%zu] = %u\n", ctx->rank, i, ((uint8_t *)sbuf)[i]);
+    }
+
+    for (size_t i = 0; i < print_count; i++) {
+        printf("[UCC OOB] Rank %d rbuf[%d] = %u\n", ctx->rank, i, ((uint8_t *)rbuf)[i]);
+    }
+
+    printf("[UCC OOB] Rank %d: sendtype = MPIR_UINT8 (0x%lx), recvtype = MPIR_UINT8 (0x%lx)\n",
+           ctx->rank, (unsigned long)(uintptr_t)MPI_UINT64_T, (unsigned long)(uintptr_t)MPI_UINT64_T);
+
+    printf("[DBG] Rank %d sees comm->remote_size = %d, local_size = %d\n", 
+        ctx->rank, ctx->comm->remote_size, ctx->comm->local_size);
+    fflush(stdout);
+
+    int mpi_errno = MPIR_Iallgather(sbuf, msglen, MPIR_UINT8,
+                                         rbuf, msglen, MPIR_UINT8,
+                                         ctx->comm, &mpi_req);
+
+    if (mpi_errno != MPI_SUCCESS || !mpi_req) {
+        return UCC_ERR_NO_RESOURCE;
+    }
+
+    *req = (void *)mpi_req;
+    return UCC_OK;
 }
 
 static ucc_status_t oob_test(void *req)
 {
     int completed;
-    int mpi_errno = MPIR_Test_impl((MPIR_Request *)req, &completed, MPI_STATUS_IGNORE);
-    return (mpi_errno == MPI_SUCCESS && completed) ? UCC_OK : UCC_INPROGRESS;
+    int mpi_errno = MPIR_Test((MPIR_Request *)req, &completed, MPI_STATUS_IGNORE);
+    return completed ? UCC_OK : UCC_INPROGRESS;
 }
 
 static ucc_status_t oob_free(void *req)
@@ -51,98 +62,100 @@ static ucc_status_t oob_free(void *req)
 static int MPIR_UCCcomm_init(MPIR_Comm *comm_ptr, int rank)
 {
     int mpi_errno = MPI_SUCCESS;
-    ucc_status_t ucc_status;
-
-    int comm_size = comm_ptr->local_size;
-    MPIR_UCCcomm *ucccomm = NULL;
-
-    ucccomm = MPL_calloc(1, sizeof(MPIR_UCCcomm), MPL_MEM_OTHER);
+    MPIR_UCCcomm *ucccomm = MPL_calloc(1, sizeof(MPIR_UCCcomm), MPL_MEM_OTHER);
     MPIR_ERR_CHKANDJUMP(!ucccomm, mpi_errno, MPI_ERR_OTHER, "**nomem");
 
-    /* Setup out of band context information that is needed by both context and team */
     ucccomm->oob_ctx.comm = comm_ptr;
+    //ucccomm->oob_ctx.comm = comm_ptr->handle;
     ucccomm->oob_ctx.rank = rank;
-
+ 
     ucc_context_oob_coll_t oob = {
         .allgather = oob_allgather,
         .req_test  = oob_test,
         .req_free  = oob_free,
         .coll_info = &ucccomm->oob_ctx,
-        .n_oob_eps = (uint32_t)comm_size, 
-        .oob_ep    = (uint32_t)rank       
+        .n_oob_eps = comm_ptr->remote_size,
+        .oob_ep    = rank
     };
 
+    ucc_lib_config_h lib_config;
+    UCC_CHECK_OR_JUMP(ucc_lib_config_read(NULL, NULL, &lib_config), mpi_errno);
 
-    /* One time global UCC setup */
-    if (!MPIR_UCC_global.initialized) {
-        UCC_CHECK_OR_JUMP(ucc_lib_config_read(NULL, NULL, &MPIR_UCC_global.lib_config), mpi_errno);
+    ucc_lib_params_t lib_params = {
+        .mask = UCC_LIB_PARAM_FIELD_THREAD_MODE,
+        .thread_mode = UCC_THREAD_SINGLE
+    };
 
-        ucc_lib_params_t lib_params = {
-            .mask = UCC_LIB_PARAM_FIELD_THREAD_MODE,
-            .thread_mode = UCC_THREAD_SINGLE
-        };
+    ucc_lib_h lib;
+    UCC_CHECK_OR_JUMP(ucc_init(&lib_params, lib_config, &lib), mpi_errno);
+    ucc_lib_config_release(lib_config);
 
-        UCC_CHECK_OR_JUMP(ucc_init(&lib_params, MPIR_UCC_global.lib_config,
-                                  &MPIR_UCC_global.ucc_lib), mpi_errno);
-        ucc_lib_config_release(MPIR_UCC_global.lib_config);
+    ucc_context_config_h ctx_config;
+    UCC_CHECK_OR_JUMP(ucc_context_config_read(lib, NULL, &ctx_config), mpi_errno);
 
-        UCC_CHECK_OR_JUMP(ucc_context_config_read(MPIR_UCC_global.ucc_lib,
-                                                  NULL, &MPIR_UCC_global.ctx_config),
-                                                  mpi_errno);
+    ucc_context_params_t ctx_params = {
+        .mask = UCC_CONTEXT_PARAM_FIELD_TYPE | UCC_CONTEXT_PARAM_FIELD_OOB,
+        .type = UCC_CONTEXT_EXCLUSIVE,
+        .oob  = oob
+    };
 
-        ucc_context_params_t ctx_params = {
-            .mask = UCC_CONTEXT_PARAM_FIELD_TYPE | UCC_CONTEXT_PARAM_FIELD_OOB, 
-            .type = UCC_CONTEXT_EXCLUSIVE,
-            .oob  = oob                         
-        };
-
-        UCC_CHECK_OR_JUMP(ucc_context_create(MPIR_UCC_global.ucc_lib,
-                                             &ctx_params, MPIR_UCC_global.ctx_config,
-                                             &MPIR_UCC_global.ucc_context),
-                                             mpi_errno);
-        ucc_context_config_release(MPIR_UCC_global.ctx_config);
-        MPIR_UCC_global.initialized = true;
-    }
-
-
-    /* Team creation */
+    ucc_context_h ctx;
+    UCC_CHECK_OR_JUMP(ucc_context_create(lib, &ctx_params, ctx_config, &ctx), mpi_errno);
+    ucc_context_config_release(ctx_config);
+    printf("WE MADE IT PAST INIT lets go\n");
     ucc_team_params_t team_params = {
         .mask = UCC_TEAM_PARAM_FIELD_EP |
-          UCC_TEAM_PARAM_FIELD_EP_RANGE | 
-          UCC_TEAM_PARAM_FIELD_OOB,
+                UCC_TEAM_PARAM_FIELD_EP_RANGE |
+                UCC_TEAM_PARAM_FIELD_OOB,
         .ep = rank,
         .ep_range = UCC_COLLECTIVE_EP_RANGE_CONTIG,
-        .oob = oob 
+        .oob = oob
     };
 
-    ucc_context_h contexts[] = { MPIR_UCC_global.ucc_context };
-    UCC_CHECK_OR_JUMP(ucc_team_create_post(contexts, 1, &team_params, &ucccomm->ucc_team), mpi_errno);
-
+   // ucc_team_h team;
+    ucc_context_h contexts[] = { ctx };
+   /*  UCC_CHECK_OR_JUMP(ucc_team_create_post(contexts, 1, &team_params, &team), mpi_errno);
     do {
-        UCC_CHECK_OR_JUMP(ucc_context_progress(MPIR_UCC_global.ucc_context), mpi_errno);
-    } while (ucc_team_create_test(ucccomm->ucc_team) == UCC_INPROGRESS);
+        UCC_CHECK_OR_JUMP(ucc_context_progress(ctx), mpi_errno);
+    } while (ucc_team_create_test(team) == UCC_INPROGRESS); */
 
-        // while (ucc_team_create_test(ucccomm->ucc_team) == UCC_INPROGRESS) {
-        //     UCC_CHECK_OR_JUMP(ucc_context_progress(MPIR_UCC_global.ucc_context), mpi_errno);
-        // }
+    ucc_team_h   team;
+    ucc_status_t status;
 
-    ucccomm->initialized = true;
-    comm_ptr->cclcomm->ucccomm = ucccomm;
+    /* post non-blocking team creation, get back the team handle */
+    UCC_CHECK_OR_JUMP(ucc_team_create_post(contexts, 1,
+                                        &team_params, &team),
+                    mpi_errno);
 
-    goto fn_exit;
-
-fn_fail:
-    if (ucccomm) {
-        if (ucccomm->ucc_team) {
-            ucc_team_destroy(ucccomm->ucc_team);
-        }
-        MPL_free(ucccomm);
+    /* drive progress until the team is fully created */
+    while ((status = ucc_team_create_test(team)) == UCC_INPROGRESS) {
+        UCC_CHECK_OR_JUMP(ucc_context_progress(ctx), mpi_errno);
     }
 
+/* make sure creation succeeded */
+    if (status != UCC_OK) {
+        mpi_errno = MPI_ERR_OTHER;
+        goto fn_fail;
+    }
+
+/* now stash your fully-initialized team */
+    ucccomm->ucc_team    = team;
+    ucccomm->ucc_context = ctx;
+    ucccomm->ucc_lib = lib;
+    ucccomm->initialized = true;
+
+    comm_ptr->cclcomm->ucccomm = ucccomm;
 fn_exit:
     return mpi_errno;
+fn_fail:
+    if (ucccomm) {
+        if (ucccomm->ucc_team) ucc_team_destroy(ucccomm->ucc_team);
+        if (ucccomm->ucc_context) ucc_context_destroy(ucccomm->ucc_context);
+        if (ucccomm->ucc_lib) ucc_finalize(ucccomm->ucc_lib);
+        MPL_free(ucccomm);
+    }
+    goto fn_exit;
 }
-
 
 static int MPIR_UCC_check_init_and_init(MPIR_Comm * comm_ptr, int rank)
 {
@@ -164,158 +177,99 @@ static int MPIR_UCC_check_init_and_init(MPIR_Comm * comm_ptr, int rank)
     goto fn_exit;
 }
 
+
+int MPIR_UCCcomm_free(MPIR_Comm *comm)
+{
+    int mpi_errno = MPI_SUCCESS;
+    MPIR_Assert(comm->cclcomm && comm->cclcomm->ucccomm);
+    MPIR_UCCcomm *ucccomm = comm->cclcomm->ucccomm;
+
+    if (ucccomm->ucc_team) ucc_team_destroy(ucccomm->ucc_team);
+    if (ucccomm->ucc_context) ucc_context_destroy(ucccomm->ucc_context);
+    if (ucccomm->ucc_lib) ucc_finalize(ucccomm->ucc_lib);
+
+    MPL_free(ucccomm);
+    comm->cclcomm->ucccomm = NULL;
+
+    return mpi_errno;
+}
+
 static int MPIR_UCC_red_op_is_supported(MPI_Op op)
 {
     switch (op) {
-        case MPI_SUM:
-        case MPI_PROD:
-        case MPI_MIN:
-        case MPI_MAX:
-        case MPI_LAND:
-        case MPI_LOR:
-        case MPI_LXOR:
-        case MPI_BAND:
-        case MPI_BOR:
-        case MPI_BXOR:
-        case MPI_MAXLOC:
-        case MPI_MINLOC:
+        case MPI_SUM: case MPI_PROD: case MPI_MIN: case MPI_MAX:
+        case MPI_LAND: case MPI_LOR: case MPI_LXOR:
+        case MPI_BAND: case MPI_BOR: case MPI_BXOR:
+        case MPI_MAXLOC: case MPI_MINLOC:
             return 1;
         default:
             return 0;
     }
 }
 
-static int MPIR_UCC_get_red_op(MPI_Op op, ucc_reduction_op_t * redOp)
+static int MPIR_UCC_get_red_op(MPI_Op op, ucc_reduction_op_t *redOp)
 {
     int mpi_errno = MPI_SUCCESS;
-
     switch (op) {
-        case MPI_SUM:
-            *redOp = UCC_OP_SUM;
-            break;
-        case MPI_PROD:
-            *redOp = UCC_OP_PROD;
-            break;
-        case MPI_MIN:
-            *redOp = UCC_OP_MIN;
-            break;
-        case MPI_MAX:
-            *redOp = UCC_OP_MAX;
-            break;
-        case MPI_LAND:
-            *redOp = UCC_OP_LAND;
-            break;
-        case MPI_LOR:
-            *redOp = UCC_OP_LOR;
-            break;
-        case MPI_LXOR:
-            *redOp = UCC_OP_LXOR;
-            break;
-        case MPI_BAND:
-            *redOp = UCC_OP_BAND;
-            break;
-        case MPI_BOR:
-            *redOp = UCC_OP_BOR;
-            break;
-        case MPI_BXOR:
-            *redOp = UCC_OP_BXOR;
-            break;
-        case MPI_MAXLOC:
-            *redOp = UCC_OP_MAXLOC;
-            break;
-        case MPI_MINLOC:
-            *redOp = UCC_OP_MINLOC;
-            break;
-        default:
-            goto fn_fail;
+        case MPI_SUM:    *redOp = UCC_OP_SUM; break;
+        case MPI_PROD:   *redOp = UCC_OP_PROD; break;
+        case MPI_MIN:    *redOp = UCC_OP_MIN; break;
+        case MPI_MAX:    *redOp = UCC_OP_MAX; break;
+        case MPI_LAND:   *redOp = UCC_OP_LAND; break;
+        case MPI_LOR:    *redOp = UCC_OP_LOR; break;
+        case MPI_LXOR:   *redOp = UCC_OP_LXOR; break;
+        case MPI_BAND:   *redOp = UCC_OP_BAND; break;
+        case MPI_BOR:    *redOp = UCC_OP_BOR; break;
+        case MPI_BXOR:   *redOp = UCC_OP_BXOR; break;
+        case MPI_MAXLOC: *redOp = UCC_OP_MAXLOC; break;
+        case MPI_MINLOC: *redOp = UCC_OP_MINLOC; break;
+        default: mpi_errno = MPI_ERR_ARG;
     }
-
-  fn_exit:
     return mpi_errno;
-  fn_fail:
-    mpi_errno = MPI_ERR_ARG;
-    goto fn_exit;
 }
 
 static int MPIR_UCC_datatype_is_supported(MPI_Datatype dtype)
 {
     switch (MPIR_DATATYPE_GET_RAW_INTERNAL(dtype)) {
-        case MPIR_INT8:
-        case MPIR_UINT8:
-        case MPIR_INT32:
-        case MPIR_UINT32:
-        case MPIR_INT64:
-        case MPIR_UINT64:
-        case MPIR_FLOAT16:
-        case MPIR_FLOAT32:
-        case MPIR_FLOAT64:
+        case MPIR_INT8: case MPIR_UINT8:
+        case MPIR_INT32: case MPIR_UINT32:
+        case MPIR_INT64: case MPIR_UINT64:
+        case MPIR_FLOAT16: case MPIR_FLOAT32: case MPIR_FLOAT64:
             return 1;
         default:
             return 0;
     }
 }
 
-static int MPIR_UCC_get_datatype(MPI_Datatype dtype, ucc_datatype_t * ucc_dtype)
+static int MPIR_UCC_get_datatype(MPI_Datatype dtype, ucc_datatype_t *ucc_dtype)
 {
     int mpi_errno = MPI_SUCCESS;
-
     switch (MPIR_DATATYPE_GET_RAW_INTERNAL(dtype)) {
-        case MPIR_INT8:
-            *ucc_dtype = UCC_DT_INT8;
-            break;
-        case MPIR_UINT8:
-            *ucc_dtype = UCC_DT_UINT8;
-            break;
-        case MPIR_INT32:
-            *ucc_dtype = UCC_DT_INT32;
-            break;
-        case MPIR_UINT32:
-            *ucc_dtype = UCC_DT_UINT32;
-            break;
-        case MPIR_INT64:
-            *ucc_dtype = UCC_DT_INT64;
-            break;
-        case MPIR_UINT64:
-            *ucc_dtype = UCC_DT_UINT64;
-            break;
-        case MPIR_FLOAT16:
-            *ucc_dtype = UCC_DT_FLOAT16;
-            break;
-        case MPIR_FLOAT32:
-            *ucc_dtype = UCC_DT_FLOAT32;
-            break;
-        case MPIR_FLOAT64:
-            *ucc_dtype = UCC_DT_FLOAT64;
-            break;
-        default:
-            goto fn_fail;
+        case MPIR_INT8:    *ucc_dtype = UCC_DT_INT8; break;
+        case MPIR_UINT8:   *ucc_dtype = UCC_DT_UINT8; break;
+        case MPIR_INT32:   *ucc_dtype = UCC_DT_INT32; break;
+        case MPIR_UINT32:  *ucc_dtype = UCC_DT_UINT32; break;
+        case MPIR_INT64:   *ucc_dtype = UCC_DT_INT64; break;
+        case MPIR_UINT64:  *ucc_dtype = UCC_DT_UINT64; break;
+        case MPIR_FLOAT16: *ucc_dtype = UCC_DT_FLOAT16; break;
+        case MPIR_FLOAT32: *ucc_dtype = UCC_DT_FLOAT32; break;
+        case MPIR_FLOAT64: *ucc_dtype = UCC_DT_FLOAT64; break;
+        default: mpi_errno = MPI_ERR_ARG;
     }
-
-  fn_exit:
     return mpi_errno;
-  fn_fail:
-    mpi_errno = MPI_ERR_ARG;
-    goto fn_exit;
 }
 
-/*
- * External functions
- */
-
-int MPIR_UCC_check_requirements_red_op(const void *sendbuf, void *recvbuf, MPI_Datatype datatype,
-                                        MPI_Op op)
+int MPIR_UCC_check_requirements_red_op(const void *sendbuf, void *recvbuf,
+                                       MPI_Datatype datatype, MPI_Op op)
 {
-    if (!MPIR_UCC_red_op_is_supported(op) || !MPIR_UCC_datatype_is_supported(datatype) ||
-        !MPIR_CCL_check_both_gpu_bufs(sendbuf, recvbuf)) {
-        return 0;
-    }
-
-    return 1;
+    return MPIR_UCC_red_op_is_supported(op) &&
+           MPIR_UCC_datatype_is_supported(datatype) &&
+           MPIR_CCL_check_both_gpu_bufs(sendbuf, recvbuf);
 }
 
-
-int MPIR_UCC_Allreduce(const void *sendbuf, void *recvbuf, MPI_Aint count, MPI_Datatype datatype,
-                        MPI_Op op, MPIR_Comm * comm_ptr, MPIR_Errflag_t errflag)
+int MPIR_UCC_Allreduce(const void *sendbuf, void *recvbuf, MPI_Aint count,
+                       MPI_Datatype datatype, MPI_Op op,
+                       MPIR_Comm *comm_ptr, MPIR_Errflag_t errflag)
 {
     int mpi_errno = MPI_SUCCESS;
 
@@ -332,24 +286,20 @@ int MPIR_UCC_Allreduce(const void *sendbuf, void *recvbuf, MPI_Aint count, MPI_D
     MPIR_ERR_CHECK(mpi_errno);
     MPIR_UCCcomm *ucccomm = comm_ptr->cclcomm->ucccomm;
 
-    ucc_coll_args_t coll_args = {
+    ucc_coll_args_t args = {
         .mask = UCC_COLL_ARGS_FIELD_FLAGS,
         .coll_type = UCC_COLL_TYPE_ALLREDUCE,
-        .src = {
-            .info = {
-                .buffer = (void *)sendbuf,
-                .count = count,
-                .datatype = uccDatatype,
-                .mem_type = UCC_MEMORY_TYPE_UNKNOWN
-            }
+        .src.info = {
+            .buffer = (void *)sendbuf,
+            .count = count,
+            .datatype = uccDatatype,
+            .mem_type = UCC_MEMORY_TYPE_UNKNOWN
         },
-        .dst = {
-            .info = {
-                .buffer = (void *)recvbuf,
-                .count = count,
-                .datatype = uccDatatype,
-                .mem_type = UCC_MEMORY_TYPE_UNKNOWN
-            }
+        .dst.info = {
+            .buffer = recvbuf,
+            .count = count,
+            .datatype = uccDatatype,
+            .mem_type = UCC_MEMORY_TYPE_UNKNOWN
         },
         .op = uccOp,
         .flags = UCC_COLL_ARGS_FLAG_CONTIG_SRC_BUFFER |
@@ -357,35 +307,14 @@ int MPIR_UCC_Allreduce(const void *sendbuf, void *recvbuf, MPI_Aint count, MPI_D
     };
 
     ucc_coll_req_h req;
-    UCC_CHECK_OR_JUMP(ucc_collective_init(&coll_args, &req, ucccomm->ucc_team), mpi_errno);
+    UCC_CHECK_OR_JUMP(ucc_collective_init(&args, &req, ucccomm->ucc_team), mpi_errno);
     UCC_CHECK_OR_JUMP(ucc_collective_post(req), mpi_errno);
-    
+
     while (ucc_collective_test(req) == UCC_INPROGRESS) {
-        UCC_CHECK_OR_JUMP(ucc_context_progress(MPIR_UCC_global.ucc_context), mpi_errno);
+        UCC_CHECK_OR_JUMP(ucc_context_progress(ucccomm->ucc_context), mpi_errno);
     }
-    
+
     UCC_CHECK_OR_JUMP(ucc_collective_finalize(req), mpi_errno);
-
-  fn_exit:
-    return mpi_errno;
-  fn_fail:
-    goto fn_exit;
-}
-
-
-
-int MPIR_UCCcomm_free(MPIR_Comm * comm)
-{
-    int mpi_errno = MPI_SUCCESS;
-    MPIR_Assert(comm->cclcomm && comm->cclcomm->ucccomm);
-    MPIR_UCCcomm *ucccomm = comm->cclcomm->ucccomm;
-
-    if (ucccomm->ucc_team) {
-        UCC_CHECK_OR_JUMP(ucc_team_destroy(ucccomm->ucc_team), mpi_errno);
-    }
-
-    MPL_free(ucccomm);
-    comm->cclcomm->ucccomm = NULL;
 
 fn_exit:
     return mpi_errno;
@@ -393,4 +322,4 @@ fn_fail:
     goto fn_exit;
 }
 
-#endif /*ENABLE UCC*/
+#endif /* ENABLE_UCC */

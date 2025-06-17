@@ -1,0 +1,24 @@
+Jobid: 886934
+qsub --mode interactive -q gpu_a100 -n 1 -t 200
+Tue Jun 17 20:33:30 2025 +0000 (UTC) submitted with cwd set to: /home/nkodkani/mpich
+jobid 886934 submitted from terminal /dev/pts/5
+Tue Jun 17 20:33:49 2025 +0000 (UTC) 
+Tue Jun 17 20:33:49 2025 +0000 (UTC) Command: '/usr/bin/ssh' 'gpu07' '/usr/libexec/cobalt/cobalt-launcher.py' '--nf' '/var/tmp/cobalt.886934' '--jobid' '886934' '--cwd' '/home/nkodkani/mpich' '--env' 'COBALT_JOBID=886934' '/bin/sleep' '12000'
+Tue Jun 17 20:33:49 2025 +0000 (UTC) 
+Tue Jun 17 20:33:49 2025 +0000 (UTC) Environment:
+Tue Jun 17 20:33:49 2025 +0000 (UTC) SHELL=/bin/bash
+Tue Jun 17 20:33:49 2025 +0000 (UTC) COBALT_NODEFILE=/tmp/tmpLf6fYK
+Tue Jun 17 20:33:49 2025 +0000 (UTC) COBALT_PARTNAME=gpu07
+Tue Jun 17 20:33:49 2025 +0000 (UTC) COBALT_JOBID=886934
+Tue Jun 17 20:33:49 2025 +0000 (UTC) COBALT_STARTTIME=1750192413
+Tue Jun 17 20:33:49 2025 +0000 (UTC) LOGNAME=nkodkani
+Tue Jun 17 20:33:49 2025 +0000 (UTC) USER=nkodkani
+Tue Jun 17 20:33:49 2025 +0000 (UTC) COBALT_ENDTIME=1750204413
+Tue Jun 17 20:33:49 2025 +0000 (UTC) COBALT_PARTSIZE=1
+Tue Jun 17 20:33:49 2025 +0000 (UTC) HOME=/home/nkodkani
+Tue Jun 17 20:33:49 2025 +0000 (UTC) COBALT_JOBSIZE=1
+Tue Jun 17 20:33:49 2025 +0000 (UTC) 
+Tue Jun 17 20:33:49 2025 +0000 (UTC) Info: stdin received from /dev/null
+Tue Jun 17 20:33:49 2025 +0000 (UTC) Info: stdout sent to /home/nkodkani/mpich/886934.output
+Tue Jun 17 20:33:49 2025 +0000 (UTC) Info: stderr sent to /home/nkodkani/mpich/886934.error
+Tue Jun 17 20:33:49 2025 +0000 (UTC) 
