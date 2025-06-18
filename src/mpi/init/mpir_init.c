@@ -291,6 +291,7 @@ int MPII_Init_thread(int *argc, char ***argv, int user_required, int *provided,
         }
     }
 
+
     /**********************************************************************/
     /* Section 5: contains post device initialization code.  Anything
      * that we could not do before the device was initialized can be
