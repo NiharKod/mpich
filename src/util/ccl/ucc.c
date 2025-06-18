@@ -66,7 +66,6 @@ static int MPIR_UCCcomm_init(MPIR_Comm *comm_ptr, int rank)
     MPIR_ERR_CHKANDJUMP(!ucccomm, mpi_errno, MPI_ERR_OTHER, "**nomem");
 
     ucccomm->oob_ctx.comm = comm_ptr;
-    //ucccomm->oob_ctx.comm = comm_ptr->handle;
     ucccomm->oob_ctx.rank = rank;
  
     ucc_context_oob_coll_t oob = {
@@ -112,14 +111,8 @@ static int MPIR_UCCcomm_init(MPIR_Comm *comm_ptr, int rank)
         .oob = oob
     };
 
-   // ucc_team_h team;
     ucc_context_h contexts[] = { ctx };
-   /*  UCC_CHECK_OR_JUMP(ucc_team_create_post(contexts, 1, &team_params, &team), mpi_errno);
-    do {
-        UCC_CHECK_OR_JUMP(ucc_context_progress(ctx), mpi_errno);
-    } while (ucc_team_create_test(team) == UCC_INPROGRESS); */
-
-    ucc_team_h   team;
+    ucc_team_h team;
     ucc_status_t status;
 
     /* post non-blocking team creation, get back the team handle */
@@ -138,7 +131,6 @@ static int MPIR_UCCcomm_init(MPIR_Comm *comm_ptr, int rank)
         goto fn_fail;
     }
 
-/* now stash your fully-initialized team */
     ucccomm->ucc_team    = team;
     ucccomm->ucc_context = ctx;
     ucccomm->ucc_lib = lib;

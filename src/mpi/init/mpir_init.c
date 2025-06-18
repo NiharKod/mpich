@@ -9,6 +9,7 @@
 #include <strings.h>
 #include "mpir_async_things.h"
 
+
 /*
 === BEGIN_MPI_T_CVAR_INFO_BLOCK ===
 
@@ -505,6 +506,7 @@ int MPII_Finalize(MPIR_Session * session_ptr)
 int MPIR_Finalize_impl(void)
 {
 #ifdef ENABLE_CCLCOMM
+    MPIR_CCL_finalize();
 #endif /* ENABLE_CCLCOMM */
     return MPII_Finalize(NULL);
 }
