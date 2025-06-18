@@ -506,7 +506,7 @@ int MPII_Finalize(MPIR_Session * session_ptr)
 int MPIR_Finalize_impl(void)
 {
 #ifdef ENABLE_CCLCOMM
-    MPIR_CCL_finalize();
+    MPIR_CCL_finalize_all();
 #endif /* ENABLE_CCLCOMM */
     return MPII_Finalize(NULL);
 }

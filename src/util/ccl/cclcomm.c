@@ -64,13 +64,17 @@ int MPIR_CCLcomm_free(MPIR_Comm * comm_ptr)
     goto fn_exit;
 }
 
-void MPIR_CCL_finalize(void)
+void MPIR_CCL_finalize_all(void)
 {
 #ifdef ENABLE_UCC
-    /* only once, at end of run */
-    if (MPIR_Process.comm_world->cclcomm->ucccomm) {
-        MPIR_UCCcomm_free(MPIR_Process.comm_world);
+   /* COMM_WORLD */
+    if (MPIR_Process.comm_world && MPIR_Process.comm_world->cclcomm) {
+        MPIR_CCLcomm_free(MPIR_Process.comm_world);
     }
+    /* COMM_SELF */
+    if (MPIR_Process.comm_self && MPIR_Process.comm_self->cclcomm) {
+        MPIR_CCLcomm_free(MPIR_Process.comm_self);
+    } 
 #endif
 }
 

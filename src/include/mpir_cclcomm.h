@@ -70,7 +70,7 @@ typedef struct MPIR_CCLcomm {
 int MPIR_CCL_check_both_gpu_bufs(const void *sendbuf, void *recvbuf);
 int MPIR_CCLcomm_init(MPIR_Comm *comm);
 int MPIR_CCLcomm_free(MPIR_Comm *comm);
-int MPIR_CCL_finalize(void);
+void MPIR_CCL_finalize_all(void);
 
 #ifdef ENABLE_NCCL
 int MPIR_NCCL_check_requirements_red_op(const void *sendbuf, void *recvbuf, MPI_Datatype datatype,
