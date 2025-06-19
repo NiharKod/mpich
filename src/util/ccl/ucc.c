@@ -85,7 +85,7 @@ static int MPIR_UCCcomm_init(MPIR_Comm *comm_ptr, int rank)
     ucccomm->oob_ctx.rank = rank;
     ucccomm->initialized   = false;
 
-    /* —— one-time library init —— */
+    /* one-time library init */
     mpi_errno = init_global_ucc_lib();
     MPIR_ERR_CHECK(mpi_errno);
 
@@ -135,9 +135,9 @@ static int MPIR_UCCcomm_init(MPIR_Comm *comm_ptr, int rank)
     }
 
     /* stash handles */
-    ucccomm->ucc_lib     = g_ucc_lib;
+    ucccomm->ucc_lib = g_ucc_lib;
     ucccomm->ucc_context = ctx;
-    ucccomm->ucc_team    = team;
+    ucccomm->ucc_team = team;
     ucccomm->initialized = true;
     comm_ptr->cclcomm->ucccomm = ucccomm;
 
