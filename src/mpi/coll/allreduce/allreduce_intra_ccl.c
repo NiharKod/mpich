@@ -14,6 +14,7 @@ int MPIR_Allreduce_intra_ccl(const void *sendbuf, void *recvbuf, MPI_Aint count,
                              MPI_Datatype datatype, MPI_Op op, MPIR_Comm * comm_ptr, int ccl,
                              MPIR_Errflag_t errflag)
 {
+   printf("ccl: %d\n", ccl); 
     switch (ccl) {
 #ifdef ENABLE_NCCL
         case MPIR_CVAR_ALLREDUCE_CCL_auto:     // Not sure yet how to handle "auto"
@@ -25,6 +26,7 @@ int MPIR_Allreduce_intra_ccl(const void *sendbuf, void *recvbuf, MPI_Aint count,
 #endif
 
 #ifdef ENABLE_UCC
+        printf("Running the UCC backend\n");
         case MPIR_CVAR_ALLREDUCE_CCL_ucc:
             if (MPIR_UCC_check_requirements_red_op(sendbuf, recvbuf, datatype, op)) {
                 return MPIR_UCC_Allreduce(sendbuf, recvbuf, count, datatype, op, comm_ptr,

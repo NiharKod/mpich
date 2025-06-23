@@ -40,12 +40,6 @@ typedef struct {
     int rank;
 } MPIR_UCC_oob_ctx_t;
 
-// typedef struct MPIR_UCCcomm {
-//     ucc_team_h ucc_team;              
-//     MPIR_UCC_oob_ctx_t oob_ctx;       
-//     bool initialized; 
-// } MPIR_UCCcomm;
-
 typedef struct MPIR_UCCcomm {
     ucc_team_h ucc_team;
     MPIR_UCC_oob_ctx_t oob_ctx;

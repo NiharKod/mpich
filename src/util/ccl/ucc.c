@@ -16,7 +16,7 @@ static int g_ucc_init_count = 0;
 /* Initialize the UCC library exactly once */
 static int init_global_ucc_lib(void)
 {
-    int mpi_errno = MPI_SUCCESS;
+   int mpi_errno = MPI_SUCCESS;
     if (g_ucc_lib == NULL) {
         UCC_CHECK_OR_JUMP(ucc_lib_config_read(NULL, NULL, &g_lib_config), mpi_errno);
         ucc_lib_params_t lib_params = {
@@ -35,7 +35,7 @@ fn_fail:
 /* Release the UCC library when the last user frees it */
 static void cleanup_global_ucc_lib(void)
 {
-    g_ucc_init_count--;
+   g_ucc_init_count--;
     if (g_ucc_init_count == 0 && g_ucc_lib) {
         ucc_finalize(g_ucc_lib);
         g_ucc_lib = NULL;
@@ -140,7 +140,7 @@ static int MPIR_UCCcomm_init(MPIR_Comm *comm_ptr, int rank)
     ucccomm->ucc_team = team;
     ucccomm->initialized = true;
     comm_ptr->cclcomm->ucccomm = ucccomm;
-
+ 
 fn_exit:
     return mpi_errno;
 fn_fail:
@@ -264,6 +264,8 @@ int MPIR_UCC_Allreduce(const void *sendbuf, void *recvbuf, MPI_Aint count,
                        MPI_Datatype datatype, MPI_Op op,
                        MPIR_Comm *comm_ptr, MPIR_Errflag_t errflag)
 {
+    int world_rank = comm_ptr->rank;
+    double t0, t1;
     int mpi_errno = MPI_SUCCESS;
     ucc_coll_req_h req = NULL;
     ucc_reduction_op_t uccOp;
@@ -274,7 +276,12 @@ int MPIR_UCC_Allreduce(const void *sendbuf, void *recvbuf, MPI_Aint count,
     mpi_errno = MPIR_UCC_get_datatype(datatype, &uccDatatype);
     MPIR_ERR_CHECK(mpi_errno);
 
+    t0 = MPI_Wtime();
     mpi_errno = MPIR_UCC_check_init_and_init(comm_ptr, comm_ptr->rank);
+    t1 = MPI_Wtime();
+    if (world_rank == 0) {
+        printf("[PROFILE] check_and_init elapsed time: %.4f\n", (t1 - t0) * 1e6);
+    }
     MPIR_ERR_CHECK(mpi_errno);
     MPIR_UCCcomm *ucccomm = comm_ptr->cclcomm->ucccomm;
 
@@ -289,10 +296,16 @@ int MPIR_UCC_Allreduce(const void *sendbuf, void *recvbuf, MPI_Aint count,
         .flags     = UCC_COLL_ARGS_FLAG_CONTIG_SRC_BUFFER |
                      UCC_COLL_ARGS_FLAG_CONTIG_DST_BUFFER
     };
+    t0 = MPI_Wtime();
     UCC_CHECK_OR_JUMP(ucc_collective_init(&args, &req, ucccomm->ucc_team), mpi_errno);
     UCC_CHECK_OR_JUMP(ucc_collective_post(req), mpi_errno);
-
+    t1 = MPI_Wtime();
+    if (world_rank == 0){
+        printf("[PROFILE] team init and post elapsed time: %.4f\n", (t1 - t0) * 1e6);
+    }
     ucc_status_t status;
+    
+    t0 = MPI_Wtime();
     while ((status = ucc_collective_test(req)) == UCC_INPROGRESS) {
         UCC_CHECK_OR_JUMP(ucc_context_progress(ucccomm->ucc_context), mpi_errno);
     }
@@ -300,8 +313,17 @@ int MPIR_UCC_Allreduce(const void *sendbuf, void *recvbuf, MPI_Aint count,
         mpi_errno = MPI_ERR_OTHER;
         goto fn_fail;
     }
-    UCC_CHECK_OR_JUMP(ucc_collective_finalize(req), mpi_errno);
+    t1 = MPI_Wtime();
+    if (world_rank == 0) {
+        printf("[PROFILE] ucc progress: %.4f\n", (t1 - t0) * 1e6);
+    }
 
+    t0 = MPI_Wtime();
+    UCC_CHECK_OR_JUMP(ucc_collective_finalize(req), mpi_errno);
+    t1 = MPI_Wtime();
+    if (world_rank == 0){
+        printf("[PROFILE] team init and post elapsed time: %.4f\n", (t1 - t0) * 1e6);
+    }
 fn_exit:
     return mpi_errno;
 fn_fail:
