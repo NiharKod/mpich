@@ -255,6 +255,9 @@ static int MPIR_UCC_get_datatype(MPI_Datatype dtype, ucc_datatype_t *ucc_dtype)
 int MPIR_UCC_check_requirements_red_op(const void *sendbuf, void *recvbuf,
                                        MPI_Datatype datatype, MPI_Op op)
 {
+    // printf("MPIR_UCC_red_op_is_supported: %d\n", MPIR_UCC_red_op_is_supported(op));
+    // printf("MPIR_UCC_datatype_is_supported: %d\n", MPIR_UCC_datatype_is_supported(datatyp));
+    // printf("MPIR_CCL_check_both_gpu_bufs: %d\n", MPIR_CCL_check_both_gpu_bufs(sendbuf, recvbuf));
     return MPIR_UCC_red_op_is_supported(op) &&
            MPIR_UCC_datatype_is_supported(datatype) &&
            MPIR_CCL_check_both_gpu_bufs(sendbuf, recvbuf);
@@ -280,7 +283,7 @@ int MPIR_UCC_Allreduce(const void *sendbuf, void *recvbuf, MPI_Aint count,
     mpi_errno = MPIR_UCC_check_init_and_init(comm_ptr, comm_ptr->rank);
     t1 = MPI_Wtime();
     if (world_rank == 0) {
-        printf("[PROFILE] check_and_init elapsed time: %.4f\n", (t1 - t0) * 1e6);
+       // printf("[PROFILE] check_and_init elapsed time: %.4f\n", (t1 - t0) * 1e6);
     }
     MPIR_ERR_CHECK(mpi_errno);
     MPIR_UCCcomm *ucccomm = comm_ptr->cclcomm->ucccomm;
@@ -301,7 +304,7 @@ int MPIR_UCC_Allreduce(const void *sendbuf, void *recvbuf, MPI_Aint count,
     UCC_CHECK_OR_JUMP(ucc_collective_post(req), mpi_errno);
     t1 = MPI_Wtime();
     if (world_rank == 0){
-        printf("[PROFILE] team init and post elapsed time: %.4f\n", (t1 - t0) * 1e6);
+       // printf("[PROFILE] team init and post elapsed time: %.4f\n", (t1 - t0) * 1e6);
     }
     ucc_status_t status;
     
@@ -315,14 +318,14 @@ int MPIR_UCC_Allreduce(const void *sendbuf, void *recvbuf, MPI_Aint count,
     }
     t1 = MPI_Wtime();
     if (world_rank == 0) {
-        printf("[PROFILE] ucc progress: %.4f\n", (t1 - t0) * 1e6);
+       // printf("[PROFILE] ucc progress: %.4f\n", (t1 - t0) * 1e6);
     }
 
     t0 = MPI_Wtime();
     UCC_CHECK_OR_JUMP(ucc_collective_finalize(req), mpi_errno);
     t1 = MPI_Wtime();
     if (world_rank == 0){
-        printf("[PROFILE] team init and post elapsed time: %.4f\n", (t1 - t0) * 1e6);
+      //  printf("[PROFILE] team init and post elapsed time: %.4f\n", (t1 - t0) * 1e6);
     }
 fn_exit:
     return mpi_errno;
